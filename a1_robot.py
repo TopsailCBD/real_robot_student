@@ -43,9 +43,9 @@ history_length = 50
 num_obs = 60
 num_actions = 12
 
-load_run = 'length'
+# load_run = 'length'
 
-# load_run = 'v2'
+load_run = 'v2'
 
 checkpoint = 20000
 
@@ -53,7 +53,7 @@ re_index = [3,4,5,0,1,2,9,10,11,6,7,8]
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-command = np.array([0.40, 0, 0.01])
+command = np.array([0.35, 0, 0.01])
 
 # command = np.array([0.35, 0, 0.01])
 # command = np.array([0.0, 0, -0.5])
