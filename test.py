@@ -107,7 +107,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             
             # print(left_img.shape,mid_img.shape,right_img.shape)
             
-            if MY_DIP.ratio_of_obstacle(mid_img,obs_mid_thrd) > obs_find_thrd:
+            if MY_DIP.ratio_of_obstacle(mid_img,obs_ctr_thrd) > obs_find_thrd:
                 robot.state = 'DETOUR_START'
                 robot.detour_clock = time.time()
                 
@@ -227,7 +227,7 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
 
 no_action = False
 
-obs_mid_thrd = 1
+obs_ctr_thrd = 1
 obs_side_thrd = 1.5
 obs_find_thrd = 0.3
 
@@ -238,6 +238,37 @@ command3 = np.array([0.35, 0, 0.21])
 t1,t2,t3 = 2,2,2
 
 if __name__ == "__main__":
+    # ==== Parser Definition ====
+    parser = argparse.ArgumentParser()
+    
+    parser.add_argument('--no-action', action='store_true')
+    parser.add_argument('--obs-ctr-thrd', type=float, default=1)
+    parser.add_argument('--obs-side-thrd',type=float, default=1.5)
+    parser.add_argument('--obs-find-thrd',type=float, default=0.3)
+    
+    parser.add_argument('-v',type=float,default=0.35)
+    parser.add_argument('-w1',type=float,default=0.21)
+    parser.add_argument('-w2',type=float,default=0.39)
+    # parser.add_argument('-w3',type=float,default=0.21)
+    parser.add_argument('-t1',type=float,default=2)
+    parser.add_argument('-t2',type=float,default=2)
+    
+    args = parser.parse_args()
+    
+    # ==== Parse Global Variables ====
+    no_action = args.no_action
+
+    obs_ctr_thrd = args.obs_ctr_thrd
+    obs_side_thrd = args.obs_side_thrd
+    obs_find_thrd = args.obs_find_thrd
+
+    command0 = np.array([args.v, 0, 0.01])
+    command1 = np.array([args.v, 0, args.w1])
+    command2 = np.array([args.v, 0, -args.w2])
+    command3 = np.array([args.v, 0, args.w1])
+    t1,t2,t3 = args.t1, args.t2, args.t1
+    
+    # ==== Shared Variabes ====
     torch.multiprocessing.set_start_method('spawn')
     shared_act_base = multiprocessing.Array(
         ctypes.c_double, 12, lock=False)
