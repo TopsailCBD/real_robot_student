@@ -12,7 +12,7 @@ from multiprocessing import Process
 
 from datetime import datetime
 
-from depth_image_process import *
+import depth_image_process as MY_DIP
 
 def GetAction(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base):
     obs = np.frombuffer(shared_obs_base, dtype=ctypes.c_double)
@@ -78,16 +78,43 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
         
         # ==== Obstacle avoidance ====
         
-        if robot.state == 'MARCH':
+        if robot.state == 'MARCHING':
             # Examine depth image
             # If find obstacle. Set command, start clock
+            left_img, mid_img, right_img = MY_DIP.divide_img(depth_image)
             
+            if MY_DIP.ratio_of_obstacle(mid_img,obs_mid_thrd) > obs_find_thrd:
+                robot.state = 'DETOUR_START'
+                robot.detour_clock = time.time()
+                
+                left_obs_ratio = MY_DIP.ratio_of_obstacle(left_img,obs_side_thrd)
+                right_obs_ratio = MY_DIP.ratio_of_obstacle(right_img,obs_side_thrd)
+                
+                if left_obs_ratio > right_obs_ratio:
+                    robot.detour_mode = 1 # Turn right first
+                else:
+                    robot.detour_mode = -1 # Turn left first
+                
+                command0 = robot.command
+                robot.command = command1 * np.array([0,0,robot.detour_mode])
+                
         elif robot.state == 'DETOUR_START':
+            if time.time() - robot.detour_clock > t1:
+                robot.state = 'DETOUR_LOOP'
+                robot.detour_clock = time.time()
+                robot.command = command2 * np.array([0,0,robot.detour_mode])
             
         elif robot.state == 'DETOUR_LOOP':
-            
+            if time.time() - robot.detour_clock > t2:
+                robot.state = 'DETOUR_END'
+                robot.detour_clock = time.time()
+                robot.command = command3 * np.array([0,0,robot.detour_mode])
+                
         elif robot.state == 'DETOUR_END':
-            
+            if time.time() - robot.detour_clock > t3:
+                robot.state = 'MARCHING'
+                robot.detour_clock = time.time()
+                robot.command = command0
         
         obs[:] = robot.ConstructObservation()
         # print('angles:', robot._motor_angles)
@@ -180,8 +207,13 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
         if(control_finish[0] > 0.):
             break
 
+obs_mid_thrd = 1
+obs_side_thrd = 1.5
+obs_find_thrd = 0.3
+
+command0 = None
 command1 = np.array([0.40, 0, 0.01])
-command2 = np.array([0.40, 0, 0.01])
+command2 = np.array([0.40, 0, -0.01])
 command3 = np.array([0.40, 0, 0.01])
 t1,t2,t3 = 0.5,0.5,0.5
 

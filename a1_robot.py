@@ -204,6 +204,10 @@ class A1Robot():
 
     self.default_dof_pos = INIT_MOTOR_ANGLES
     self.last_raw_action = np.zeros(12)
+    
+    self.state = 'MARCHING'
+    self.detour_mode = 0
+    self.detour_clock = -1
 
     self.device = device
 

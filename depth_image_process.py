@@ -1,10 +1,11 @@
 import math
 import time
+
 import cv2
 import numpy as np
 import pyrealsense2 as rs
-from scipy import ndimage as nd
 from PIL import Image as im
+from scipy import ndimage as nd
 
 # # Configure depth and color streams
 # pipeline = rs.pipeline()
@@ -32,7 +33,7 @@ def divide_img(depth_img:np.ndarray,middle_size=None):
     
     return depth_img[:,:divide1], depth_img[:,divide1:divide2], depth_img[:,divide2:]
 
-def calculate_rate_of_obstacle(depth_img,depth_thrd):
+def ratio_of_obstacle(depth_img,depth_thrd):
     """
     Calculate the rate of pixcels that is close enough.
     :param depth_img: np.ndarray of any shape
