@@ -4,6 +4,7 @@ import time
 import numpy as np
 import torch
 import os
+import argparse
 
 import ctypes
 import multiprocessing
@@ -92,8 +93,10 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
     #begin control
     begin_control_time = time.time()
     while(True):
-        # robot._StepInternal(act)
-        robot._StepInternal(np.zeros(12))
+        if no_action or robot.state == 'FROZEN':
+            robot._StepInternal(np.zeros(12))
+        else:
+            robot._StepInternal(act)
         
         # ==== Obstacle avoidance ====
         
@@ -112,23 +115,23 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                 right_obs_ratio = MY_DIP.ratio_of_obstacle(right_img,obs_side_thrd)
                 
                 if left_obs_ratio > right_obs_ratio:
-                    robot.detour_mode = 1 # Turn right first
+                    robot.detour_mode = -1 # Turn right first
                     direction = 'right'
                 else:
-                    robot.detour_mode = -1 # Turn left first
+                    robot.detour_mode = 1 # Turn left first
                     direction = 'left'
                     
                 print('Detect obstacle, start detour, direction:',direction)
                 
                 command0 = robot.command
-                robot.command = command1 * np.array([0,0,robot.detour_mode])
+                robot.command = command1 * np.array([1,0,robot.detour_mode])
                 print('Change command to',robot.command)
                 
         elif robot.state == 'DETOUR_START':
             if time.time() - robot.detour_clock > t1:
                 robot.state = 'DETOUR_LOOP'
                 robot.detour_clock = time.time()
-                robot.command = command2 * np.array([0,0,robot.detour_mode])
+                robot.command = command2 * np.array([1,0,robot.detour_mode])
                 print('Start step of detour ends.')
                 print('Change command to',robot.command)
             
@@ -136,13 +139,14 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             if time.time() - robot.detour_clock > t2:
                 robot.state = 'DETOUR_END'
                 robot.detour_clock = time.time()
-                robot.command = command3 * np.array([0,0,robot.detour_mode])
+                robot.command = command3 * np.array([1,0,robot.detour_mode])
                 print('Loop step of detour ends.')
                 print('Change command to',robot.command)
                 
         elif robot.state == 'DETOUR_END':
             if time.time() - robot.detour_clock > t3:
-                robot.state = 'MARCHING'
+                # robot.state = 'MARCHING'
+                robot.state = 'FROZEN'
                 robot.detour_clock = time.time()
                 robot.command = command0
                 print('End step of detour ends.')
@@ -220,15 +224,18 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
         if(control_finish[0] > 0.):
             break
 
+
+no_action = False
+
 obs_mid_thrd = 1
 obs_side_thrd = 1.5
 obs_find_thrd = 0.3
 
 command0 = None
 command1 = np.array([0.35, 0, 0.21])
-command2 = np.array([0.35, 0, -0.19])
+command2 = np.array([0.35, 0, -0.39])
 command3 = np.array([0.35, 0, 0.21])
-t1,t2,t3 = 1,1.5,1
+t1,t2,t3 = 2,2,2
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method('spawn')
@@ -250,7 +257,7 @@ if __name__ == "__main__":
     obs[:] = np.zeros(48)
 
     # Add shared depth image to RobotControl
-    p1 = Process(target=RobotControl, args=(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, shared_depth_image_base, 20,))
+    p1 = Process(target=RobotControl, args=(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, shared_depth_image_base, 12,))
     p2 = Process(target=GetAction, args=(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, ))
     p3 = Process(target=GetDepthImage, args=(shared_depth_image_base,control_finish_base))
     p1.start()
