@@ -1,19 +1,18 @@
-from a1_robot import Policy
-from a1_robot import A1Robot
-import time
-import numpy as np
-import torch
-import os
 import argparse
-
 import ctypes
 import multiprocessing
-import pyrealsense2 as rs
+import os
+import time
+from datetime import datetime
 from multiprocessing import Process
 
-from datetime import datetime
+import numpy as np
+import pyrealsense2 as rs
+import torch
 
 import depth_image_process as MY_DIP
+from a1_robot import A1Robot, Policy
+
 
 def GetAction(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base):
     obs = np.frombuffer(shared_obs_base, dtype=ctypes.c_double)
@@ -109,9 +108,13 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             # Examine depth image
             left_img, mid_img, right_img = MY_DIP.divide_img(depth_image)     
             
-            mid_obs_ratio = MY_DIP.ratio_of_obstacle(mid_img,obs_ctr_thrd)
-            left_obs_ratio = MY_DIP.ratio_of_obstacle(left_img,obs_side_thrd)
-            right_obs_ratio = MY_DIP.ratio_of_obstacle(right_img,obs_side_thrd)
+            mid_obs_ratio = MY_DIP.ratio_of_obstacle(mid_img,ctr_dist)
+            left_obs_ratio = MY_DIP.ratio_of_obstacle(left_img,side_dist)
+            right_obs_ratio = MY_DIP.ratio_of_obstacle(right_img,side_dist)
+            
+            mid_deadend_ratio = MY_DIP.ratio_of_obstacle(mid_img,deadend_dist)
+            left_deadend_ratio = MY_DIP.ratio_of_obstacle(left_img,deadend_dist)
+            right_deadend_ratio = MY_DIP.ratio_of_obstacle(right_img,deadend_dist)
             
             # If spinning, examine whether can it find a way out
             if robot.state == 'SPINNING':
@@ -121,7 +124,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     print('Clear ahead, resume marching')
                         
             # If obstacles on all directions, spin
-            elif min(mid_obs_ratio,left_obs_ratio,right_obs_ratio) > deadend_thrd:
+            elif min(mid_deadend_ratio,left_deadend_ratio,right_deadend_ratio) > deadend_thrd:
                 # robot.state = 'SPINNING'
                 robot.state = 'FROZEN'
                 robot.detour_clock = -1
@@ -255,18 +258,20 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--no-action', action='store_true')
-parser.add_argument('--obs-ctr-thrd', type=float, default=1)
-parser.add_argument('--obs-side-thrd',type=float, default=1.5)
+
+parser.add_argument('--ctr-dist', type=float, default=1)
+parser.add_argument('--side-dist',type=float, default=1.5)
+parser.add_argument('--deadend-dist',type=float, default=0.8)
 
 parser.add_argument('--detour-thrd',type=float, default=0.3)
 parser.add_argument('--deadend-thrd',type=float, default=0.6)
 
 parser.add_argument('-v',type=float,default=0.35)
 parser.add_argument('-w1',type=float,default=0.20)
-parser.add_argument('-w2',type=float,default=0.20)
+parser.add_argument('-w2',type=float,default=0.16)
 # parser.add_argument('-w3',type=float,default=0.21)
 parser.add_argument('-t1',type=float,default=2)
-parser.add_argument('-t2',type=float,default=4)
+# parser.add_argument('-t2',type=float,default=4)
 parser.add_argument('-tn',type=float,default=1)
 
 parser.add_argument('--tmax',type=float,default=20)
@@ -276,8 +281,9 @@ args = parser.parse_args()
 # ==== Parse Global Variables ====
 no_action = args.no_action
 
-obs_ctr_thrd = args.obs_ctr_thrd
-obs_side_thrd = args.obs_side_thrd
+ctr_dist = args.ctr_dist
+side_dist = args.side_dist
+deadend_dist = args.deadend_dist
 
 detour_thrd = args.detour_thrd
 deadend_thrd = args.deadend_thrd
@@ -289,7 +295,11 @@ command3 = np.array([args.v, 0, args.w1])
 
 command_spin = np.array([0,0,0.1])
 
-t1,t2,t3 = args.t1, args.t2, args.t1
+# t1,t2,t3 = args.t1, args.t2, args.t1
+
+t1 = args.t1
+t2 = 2 * args.w1 * args.t1 / args.w2
+t3 = args.t1
 tn = args.tn
 tmax = args.tmax
 
