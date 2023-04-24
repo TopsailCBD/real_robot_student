@@ -90,68 +90,94 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
 
     print('reset finish, begin control')
     reset_finish[0] = 1
+    
     #begin control
     begin_control_time = time.time()
+    
     while(True):
+        # Near the end of the control, freeze the agent.
+        if time.time() - begin_control_time > tmax - tn:
+            robot.state = 'FROZEN'
+        
         if no_action or robot.state == 'FROZEN':
             robot._StepInternal(np.zeros(12))
         else:
             robot._StepInternal(act)
         
         # ==== Obstacle avoidance ====
-        
-        if robot.state == 'MARCHING':
+        if robot.state not in ['FROZEN']:
             # Examine depth image
-            # If find obstacle. Set command, start clock
-            left_img, mid_img, right_img = MY_DIP.divide_img(depth_image)
+            left_img, mid_img, right_img = MY_DIP.divide_img(depth_image)     
             
-            # print(left_img.shape,mid_img.shape,right_img.shape)
+            mid_obs_ratio = MY_DIP.ratio_of_obstacle(mid_img,obs_ctr_thrd)
+            left_obs_ratio = MY_DIP.ratio_of_obstacle(left_img,obs_side_thrd)
+            right_obs_ratio = MY_DIP.ratio_of_obstacle(right_img,obs_side_thrd)
             
-            if MY_DIP.ratio_of_obstacle(mid_img,obs_ctr_thrd) > obs_find_thrd:
-                robot.state = 'DETOUR_START'
-                robot.detour_clock = time.time()
-                
-                left_obs_ratio = MY_DIP.ratio_of_obstacle(left_img,obs_side_thrd)
-                right_obs_ratio = MY_DIP.ratio_of_obstacle(right_img,obs_side_thrd)
-                
-                if left_obs_ratio > right_obs_ratio:
-                    robot.detour_mode = -1 # Turn right first
-                    direction = 'right'
-                else:
-                    robot.detour_mode = 1 # Turn left first
-                    direction = 'left'
-                    
-                print('Detect obstacle, start detour, direction:',direction)
-                
-                command0 = robot.command
-                robot.command = command1 * np.array([1,0,robot.detour_mode])
-                print('Change command to',robot.command)
-                
-        elif robot.state == 'DETOUR_START':
-            if time.time() - robot.detour_clock > t1:
-                robot.state = 'DETOUR_LOOP'
-                robot.detour_clock = time.time()
-                robot.command = command2 * np.array([1,0,robot.detour_mode])
-                print('Start step of detour ends.')
-                print('Change command to',robot.command)
-            
-        elif robot.state == 'DETOUR_LOOP':
-            if time.time() - robot.detour_clock > t2:
-                robot.state = 'DETOUR_END'
-                robot.detour_clock = time.time()
-                robot.command = command3 * np.array([1,0,robot.detour_mode])
-                print('Loop step of detour ends.')
-                print('Change command to',robot.command)
-                
-        elif robot.state == 'DETOUR_END':
-            if time.time() - robot.detour_clock > t3:
-                # robot.state = 'MARCHING'
+            # If spinning, examine whether can it find a way out
+            if robot.state == 'SPINNING':
+                if mid_obs_ratio < detour_thrd:
+                    robot.state = 'MARCHING'
+                    robot.command = command0
+                    print('Clear ahead, resume marching')
+                        
+            # If obstacles on all directions, spin
+            elif min(mid_obs_ratio,left_obs_ratio,right_obs_ratio) > deadend_thrd:
+                # robot.state = 'SPINNING'
                 robot.state = 'FROZEN'
-                robot.detour_clock = time.time()
-                robot.command = command0
-                print('End step of detour ends.')
-                print('Change command to',robot.command)
+                robot.detour_clock = -1
+                robot.detour_mode = 0 # Not detouring
                 
+                robot.command = command_spin
+                print('Obstacles around, spinning to find a way out')
+            
+            # Other cases, perform detouring as follows
+            elif robot.state == 'MARCHING':
+                # If find obstacle. Set command, start clock
+                if mid_obs_ratio > detour_thrd:
+                    robot.state = 'DETOUR_START'
+                    robot.detour_clock = time.time()
+                    
+                    if left_obs_ratio > right_obs_ratio:
+                        robot.detour_mode = -1 # Turn right first
+                        detour_direction = 'right'
+                    else:
+                        robot.detour_mode = 1 # Turn left first
+                        detour_direction = 'left'
+                        
+                    print('Detect obstacle, start detour, direction:',detour_direction)
+                    
+                    command0 = robot.command
+                    robot.command = command1 * np.array([1,0,robot.detour_mode])
+                    print('Change command to',robot.command)
+                    
+            elif robot.state == 'DETOUR_START':
+                if time.time() - robot.detour_clock > t1:
+                    robot.state = 'DETOUR_LOOP'
+                    robot.detour_clock = time.time()
+                    
+                    robot.command = command2 * np.array([1,0,robot.detour_mode])
+                    print('Start step of detour ends.')
+                    print('Change command to',robot.command)
+                
+            elif robot.state == 'DETOUR_LOOP':
+                if time.time() - robot.detour_clock > t2:
+                    robot.state = 'DETOUR_END'
+                    robot.detour_clock = time.time()
+                    
+                    robot.command = command3 * np.array([1,0,robot.detour_mode])
+                    print('Loop step of detour ends.')
+                    print('Change command to',robot.command)
+                    
+            elif robot.state == 'DETOUR_END':
+                if time.time() - robot.detour_clock > t3:
+                    robot.state = 'MARCHING'
+                    robot.detour_clock = time.time()
+                    
+                    robot.command = command0
+                    print('End step of detour ends.')
+                    print('Change command to',robot.command)
+        
+        
         # print(robot.state, robot.command)
         
         
@@ -225,49 +251,50 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
             break
 
 
-no_action = False
+# ==== Parser Definition ====
+parser = argparse.ArgumentParser()
 
-obs_ctr_thrd = 1
-obs_side_thrd = 1.5
-obs_find_thrd = 0.3
+parser.add_argument('--no-action', action='store_true')
+parser.add_argument('--obs-ctr-thrd', type=float, default=1)
+parser.add_argument('--obs-side-thrd',type=float, default=1.5)
 
-command0 = None
-command1 = np.array([0.35, 0, 0.21])
-command2 = np.array([0.35, 0, -0.39])
-command3 = np.array([0.35, 0, 0.21])
-t1,t2,t3 = 2,2,2
+parser.add_argument('--detour-thrd',type=float, default=0.3)
+parser.add_argument('--deadend-thrd',type=float, default=0.6)
+
+parser.add_argument('-v',type=float,default=0.35)
+parser.add_argument('-w1',type=float,default=0.20)
+parser.add_argument('-w2',type=float,default=0.20)
+# parser.add_argument('-w3',type=float,default=0.21)
+parser.add_argument('-t1',type=float,default=2)
+parser.add_argument('-t2',type=float,default=4)
+parser.add_argument('-tn',type=float,default=1)
+
+parser.add_argument('--tmax',type=float,default=20)
+
+args = parser.parse_args()
+
+# ==== Parse Global Variables ====
+no_action = args.no_action
+
+obs_ctr_thrd = args.obs_ctr_thrd
+obs_side_thrd = args.obs_side_thrd
+
+detour_thrd = args.detour_thrd
+deadend_thrd = args.deadend_thrd
+
+command0 = np.array([args.v, 0, 0.01])
+command1 = np.array([args.v, 0, args.w1])
+command2 = np.array([args.v, 0, -args.w2])
+command3 = np.array([args.v, 0, args.w1])
+
+command_spin = np.array([0,0,0.1])
+
+t1,t2,t3 = args.t1, args.t2, args.t1
+tn = args.tn
+tmax = args.tmax
 
 if __name__ == "__main__":
-    # ==== Parser Definition ====
-    parser = argparse.ArgumentParser()
-    
-    parser.add_argument('--no-action', action='store_true')
-    parser.add_argument('--obs-ctr-thrd', type=float, default=1)
-    parser.add_argument('--obs-side-thrd',type=float, default=1.5)
-    parser.add_argument('--obs-find-thrd',type=float, default=0.3)
-    
-    parser.add_argument('-v',type=float,default=0.35)
-    parser.add_argument('-w1',type=float,default=0.21)
-    parser.add_argument('-w2',type=float,default=0.39)
-    # parser.add_argument('-w3',type=float,default=0.21)
-    parser.add_argument('-t1',type=float,default=2)
-    parser.add_argument('-t2',type=float,default=2)
-    
-    args = parser.parse_args()
-    
-    # ==== Parse Global Variables ====
-    no_action = args.no_action
-
-    obs_ctr_thrd = args.obs_ctr_thrd
-    obs_side_thrd = args.obs_side_thrd
-    obs_find_thrd = args.obs_find_thrd
-
-    command0 = np.array([args.v, 0, 0.01])
-    command1 = np.array([args.v, 0, args.w1])
-    command2 = np.array([args.v, 0, -args.w2])
-    command3 = np.array([args.v, 0, args.w1])
-    t1,t2,t3 = args.t1, args.t2, args.t1
-    
+       
     # ==== Shared Variabes ====
     torch.multiprocessing.set_start_method('spawn')
     shared_act_base = multiprocessing.Array(
@@ -288,7 +315,7 @@ if __name__ == "__main__":
     obs[:] = np.zeros(48)
 
     # Add shared depth image to RobotControl
-    p1 = Process(target=RobotControl, args=(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, shared_depth_image_base, 12,))
+    p1 = Process(target=RobotControl, args=(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, shared_depth_image_base, tmax,))
     p2 = Process(target=GetAction, args=(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, ))
     p3 = Process(target=GetDepthImage, args=(shared_depth_image_base,control_finish_base))
     p1.start()
