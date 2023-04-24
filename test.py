@@ -118,20 +118,22 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             
             # If spinning, examine whether can it find a way out
             if robot.state == 'SPINNING':
-                if mid_obs_ratio < detour_thrd:
+                print('I am spinning!',robot.command)
+                if min(mid_deadend_ratio,left_deadend_ratio,right_deadend_ratio) < deadend_thrd - 0.1:
                     robot.state = 'MARCHING'
                     robot.command = command0
                     print('Clear ahead, resume marching')
                         
             # If obstacles on all directions, spin
             elif min(mid_deadend_ratio,left_deadend_ratio,right_deadend_ratio) > deadend_thrd:
-                # robot.state = 'SPINNING'
-                robot.state = 'FROZEN'
+                robot.state = 'SPINNING'
+                # robot.state = 'FROZEN'
                 robot.detour_clock = -1
                 robot.detour_mode = 0 # Not detouring
                 
                 robot.command = command_spin
                 print('Obstacles around, spinning to find a way out')
+                print('Change command to',robot.command)
             
             # Other cases, perform detouring as follows
             elif robot.state == 'MARCHING':
@@ -267,9 +269,12 @@ parser.add_argument('--detour-thrd',type=float, default=0.3)
 parser.add_argument('--deadend-thrd',type=float, default=0.6)
 
 parser.add_argument('-v',type=float,default=0.35)
+
 parser.add_argument('-w1',type=float,default=0.20)
 parser.add_argument('-w2',type=float,default=0.16)
+parser.add_argument('-ws',type=float,default=0.16)
 # parser.add_argument('-w3',type=float,default=0.21)
+
 parser.add_argument('-t1',type=float,default=2)
 # parser.add_argument('-t2',type=float,default=4)
 parser.add_argument('-tn',type=float,default=1)
@@ -293,7 +298,7 @@ command1 = np.array([args.v, 0, args.w1])
 command2 = np.array([args.v, 0, -args.w2])
 command3 = np.array([args.v, 0, args.w1])
 
-command_spin = np.array([0,0,0.1])
+command_spin = np.array([0.01,0,args.ws])
 
 # t1,t2,t3 = args.t1, args.t2, args.t1
 
