@@ -94,17 +94,26 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
     begin_control_time = time.time()
     
     while(True):
+        # ==== Obstacle avoidance ====
         # Near the end of the control, freeze the agent.
         if time.time() - begin_control_time > tmax - tn:
             robot.state = 'FROZEN'
+            # print('Test finished, freeze the agent')
         
         if no_action or robot.state == 'FROZEN':
             robot._StepInternal(np.zeros(12))
         else:
             robot._StepInternal(act)
         
-        # ==== Obstacle avoidance ====
-        if robot.state not in ['FROZEN']:
+        if debug:
+            # # Test code only for debug
+            # robot.state = 'DEBUG'
+            # robot.command = command_spin
+            # print('Command:',robot.command)
+            robot.state = 'FROZEN'
+            
+        elif robot.state is not 'FROZEN':
+            ## Normal test now
             # Examine depth image
             left_img, mid_img, right_img = MY_DIP.divide_img(depth_image)     
             
@@ -118,9 +127,10 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             
             # If spinning, examine whether can it find a way out
             if robot.state == 'SPINNING':
-                print('I am spinning!',robot.command)
+                # print('I am spinning!',robot.command)
                 if min(mid_deadend_ratio,left_deadend_ratio,right_deadend_ratio) < deadend_thrd - 0.1:
-                    robot.state = 'MARCHING'
+                    # robot.state = 'MARCHING'
+                    robot.state = 'FROZEN'
                     robot.command = command0
                     print('Clear ahead, resume marching')
                         
@@ -205,7 +215,7 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
     # Start streaming
     pipeline.start(config)
 
-    depth_image = np.frombuffer(shared_depth_image_base, dtype=ctypes.c_double)
+    depth_image = np.frombuffer(shared_depth_image_base, dtype=ctypes.c_double)    
     depth_image = np.reshape(depth_image, (40, 80))
     control_finish = np.frombuffer(control_finish_base, dtype=ctypes.c_double)
 
@@ -223,17 +233,35 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
     last_time = time.time()
     last_last_time = last_time
 
+    save_img = False
+    last_save = time.time()
+    save_step = 0.5
+    
     while(True):
         while(last_time + 0.1 - time.time() > 0.):
             time.sleep(0.001)
         # print('depth image interval:', last_time - last_last_time)
         last_last_time = last_time
         last_time = time.time()
+        
+        save_img = False
+        if last_time - last_save > save_step:
+            last_save = last_time
+            save_img = True
+            print('Would save images.',last_time)
+        
         # Wait for a coherent pair of frames: depth and color
         frame = pipeline.wait_for_frames()
 
         depth_frame = frame.get_depth_frame()
 
+        # print(np.asanyarray(depth_frame.get_data()).shape) # (480,848)
+        if save_img:
+            np.save(
+                f'../data/raw/{last_time}.npy', 
+                np.asanyarray(depth_frame.get_data())
+            )
+        
         depth_frame = decimation.process(depth_frame)
         # depth_frame = depth_to_disparity.process(depth_frame)
         depth_frame = spatial.process(depth_frame)
@@ -242,12 +270,26 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
         depth_frame = hole_filling.process(depth_frame)
 
 
-        tmp_depth_image = np.asanyarray(depth_frame.get_data())
+        tmp_depth_image = np.asanyarray(depth_frame.get_data()) # (60,108)
+        # print(tmp_depth_image.shape)
+        if save_img:
+            np.save(
+                f'../data/tmp/{last_time}.npy', 
+                tmp_depth_image
+            )        
+        
         tmp_depth_image = tmp_depth_image / 1000
         tmp_depth_image = tmp_depth_image[:, 8:]
         tmp_depth_image[tmp_depth_image > 5] = 5
 
         tmp_depth_image = tmp_depth_image[10:-10,10:-10]
+        
+        if save_img:
+            np.save(
+                f'../data/final/{last_time}.npy', 
+                tmp_depth_image
+            )
+        
         depth_image[:] = tmp_depth_image[:]
         
         # depth_image[:] = (tmp_depth_image - 2.5) / 2.5
@@ -259,6 +301,7 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
 # ==== Parser Definition ====
 parser = argparse.ArgumentParser()
 
+parser.add_argument('--debug', action='store_true')
 parser.add_argument('--no-action', action='store_true')
 
 parser.add_argument('--ctr-dist', type=float, default=1)
@@ -270,9 +313,9 @@ parser.add_argument('--deadend-thrd',type=float, default=0.6)
 
 parser.add_argument('-v',type=float,default=0.35)
 
-parser.add_argument('-w1',type=float,default=0.20)
+parser.add_argument('-w1',type=float,default=0.24)
 parser.add_argument('-w2',type=float,default=0.16)
-parser.add_argument('-ws',type=float,default=0.16)
+parser.add_argument('-ws',type=float,default=0.40)
 # parser.add_argument('-w3',type=float,default=0.21)
 
 parser.add_argument('-t1',type=float,default=2)
@@ -284,6 +327,7 @@ parser.add_argument('--tmax',type=float,default=20)
 args = parser.parse_args()
 
 # ==== Parse Global Variables ====
+debug = args.debug
 no_action = args.no_action
 
 ctr_dist = args.ctr_dist
