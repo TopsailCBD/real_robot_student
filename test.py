@@ -213,7 +213,12 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
     config.enable_stream(rs.stream.depth, rs.format.z16, 30)
     config.enable_stream(rs.stream.color, rs.format.bgr8, 30)
     # Start streaming
-    pipeline.start(config)
+    cfg = pipeline.start(config)
+    
+    time.sleep(1)
+    profile = cfg.get_stream(rs.stream.depth)
+    intr = profile.as_video_stream_profile().get_intrinsics()
+    print(intr)
 
     depth_image = np.frombuffer(shared_depth_image_base, dtype=ctypes.c_double)    
     depth_image = np.reshape(depth_image, (40, 80))
@@ -232,10 +237,10 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
 
     last_time = time.time()
     last_last_time = last_time
-
-    save_img = False
-    last_save = time.time()
-    save_step = 0.5
+    
+    save_flag = False
+    if save_step > 0:    
+        last_save = last_time
     
     while(True):
         while(last_time + 0.1 - time.time() > 0.):
@@ -244,11 +249,12 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
         last_last_time = last_time
         last_time = time.time()
         
-        save_img = False
-        if last_time - last_save > save_step:
-            last_save = last_time
-            save_img = True
-            print('Would save images.',last_time)
+        if save_step > 0:
+            save_flag = False
+            if last_time - last_save > save_step:
+                last_save = last_time
+                save_flag = True
+                print('Would save images.',last_time)
         
         # Wait for a coherent pair of frames: depth and color
         frame = pipeline.wait_for_frames()
@@ -256,7 +262,7 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
         depth_frame = frame.get_depth_frame()
 
         # print(np.asanyarray(depth_frame.get_data()).shape) # (480,848)
-        if save_img:
+        if save_step > 0 and save_flag:
             np.save(
                 f'../data/raw/{last_time}.npy', 
                 np.asanyarray(depth_frame.get_data())
@@ -272,7 +278,7 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
 
         tmp_depth_image = np.asanyarray(depth_frame.get_data()) # (60,108)
         # print(tmp_depth_image.shape)
-        if save_img:
+        if save_step > 0 and save_flag:
             np.save(
                 f'../data/tmp/{last_time}.npy', 
                 tmp_depth_image
@@ -284,7 +290,7 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
 
         tmp_depth_image = tmp_depth_image[10:-10,10:-10]
         
-        if save_img:
+        if save_step > 0 and save_flag:
             np.save(
                 f'../data/final/{last_time}.npy', 
                 tmp_depth_image
@@ -303,6 +309,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('--no-action', action='store_true')
+parser.add_argument('--save-step',type=float,default=-1)
 
 parser.add_argument('--ctr-dist', type=float, default=1)
 parser.add_argument('--side-dist',type=float, default=1.5)
@@ -329,6 +336,7 @@ args = parser.parse_args()
 # ==== Parse Global Variables ====
 debug = args.debug
 no_action = args.no_action
+save_step = args.save_step
 
 ctr_dist = args.ctr_dist
 side_dist = args.side_dist
