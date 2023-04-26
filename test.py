@@ -115,27 +115,28 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
         elif robot.state is not 'FROZEN':
             ## Normal test now
             # Examine depth image
-            left_img, mid_img, right_img = MY_DIP.divide_img(depth_image)     
+            three_part_img = MY_DIP.divide_img(depth_image)
             
-            mid_obs_ratio = MY_DIP.ratio_of_obstacle(mid_img,ctr_dist)
-            left_obs_ratio = MY_DIP.ratio_of_obstacle(left_img,side_dist)
-            right_obs_ratio = MY_DIP.ratio_of_obstacle(right_img,side_dist)
+            left_obs,mid_obs,right_obs = MY_DIP.ratios_of_three_parts(three_part_img,[side_dist,ctr_dist,side_dist])
             
-            mid_deadend_ratio = MY_DIP.ratio_of_obstacle(mid_img,deadend_dist)
-            left_deadend_ratio = MY_DIP.ratio_of_obstacle(left_img,deadend_dist)
-            right_deadend_ratio = MY_DIP.ratio_of_obstacle(right_img,deadend_dist)
+            left_dea,mid_dea,right_dea = MY_DIP.ratios_of_three_parts(three_part_img,[deadend_dist]*3)
+            
+            left_col,mid_col,right_col = MY_DIP.ratios_of_three_parts(three_part_img,[collision_dist]*3)
             
             # If spinning, examine whether can it find a way out
             if robot.state == 'SPINNING':
                 # print('I am spinning!',robot.command)
-                if min(mid_deadend_ratio,left_deadend_ratio,right_deadend_ratio) < deadend_thrd - 0.1:
+                if min(mid_dea,left_dea,right_dea) < 0.3:
                     # robot.state = 'MARCHING'
                     robot.state = 'FROZEN'
                     robot.command = command0
                     print('Clear ahead, resume marching')
-                        
-            # If obstacles on all directions, spin
-            elif min(mid_deadend_ratio,left_deadend_ratio,right_deadend_ratio) > deadend_thrd:
+            
+            # If obstacles with close distance appears, adjust to the opposite direction
+            
+            
+            # If obstacles with fair distance on all directions, spin
+            elif min(mid_dea,left_dea,right_dea) > deadend_thrd:
                 robot.state = 'SPINNING'
                 # robot.state = 'FROZEN'
                 robot.detour_clock = -1
@@ -148,11 +149,11 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             # Other cases, perform detouring as follows
             elif robot.state == 'MARCHING':
                 # If find obstacle. Set command, start clock
-                if mid_obs_ratio > detour_thrd:
+                if mid_obs > detour_thrd:
                     robot.state = 'DETOUR_START'
                     robot.detour_clock = time.time()
                     
-                    if left_obs_ratio > right_obs_ratio:
+                    if left_obs > right_obs:
                         robot.detour_mode = -1 # Turn right first
                         detour_direction = 'right'
                     else:
@@ -314,9 +315,11 @@ parser.add_argument('--save-step',type=float,default=-1)
 parser.add_argument('--ctr-dist', type=float, default=1)
 parser.add_argument('--side-dist',type=float, default=1.5)
 parser.add_argument('--deadend-dist',type=float, default=0.8)
+parser.add_argument('--collision-dist',type=float, default=0.3)
 
 parser.add_argument('--detour-thrd',type=float, default=0.3)
 parser.add_argument('--deadend-thrd',type=float, default=0.6)
+parser.add_argument('--collision-thrd',type=float, default=0.3)
 
 parser.add_argument('-v',type=float,default=0.35)
 
@@ -341,9 +344,11 @@ save_step = args.save_step
 ctr_dist = args.ctr_dist
 side_dist = args.side_dist
 deadend_dist = args.deadend_dist
+collision_dist = args.collision_dist
 
 detour_thrd = args.detour_thrd
 deadend_thrd = args.deadend_thrd
+collision_thrd = args.collision_thrd
 
 command0 = np.array([args.v, 0, 0.01])
 command1 = np.array([args.v, 0, args.w1])

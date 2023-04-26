@@ -41,3 +41,6 @@ def ratio_of_obstacle(depth_img,depth_thrd):
     """
     return np.count_nonzero(depth_img < depth_thrd) / depth_img.size
 
+def ratios_of_three_parts(three_img,three_thrd):
+    return [ratio_of_obstacle(img,thrd) for img,thrd in zip(three_img,three_thrd)]
+
