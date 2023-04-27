@@ -7,14 +7,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyrealsense2 as rs
 from tqdm import tqdm
+import pickle
+
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 data_dir = "../data_marching/tmp"
 out_dir = "../fig/rectangular"
 
 # 读取深度图
 def get_depth_image(file):
-    tmp_depth = np.load(os.path.join(data_dir, file))
+    tmp_depth = np.load(os.path.join(data_dir, file)) # (60,108)
+    tmp_depth = tmp_depth[10:-10,10:-18] # (40,80)
+    tmp_depth = np.pad(tmp_depth, ((10,10),(10,18)), 'constant', constant_values=0) # (60,108)
     # print(tmp_depth.shape)
+    
     resized_depth = cv2.resize(tmp_depth, (848,480), interpolation=cv2.INTER_NEAREST)
     # print(resized_depth.shape)
     return resized_depth
@@ -24,13 +30,52 @@ def depth_pixel_to_pointcloud(depth_image, intrinsics, depth_pixel):
     # print(depth_pixel)
     dis = depth_image[depth_pixel]
     
-    if dis == 0 or dis > 30000:
-        return [0,0,0]
+    # if dis == 0 or dis > 30000:
+    #     return [0,0,0]
     camera_coordinate = rs.rs2_deproject_pixel_to_point(intrinsics, depth_pixel, dis)
     return camera_coordinate
 
+def convert_depth_frame_to_pointcloud(depth_image, camera_intrinsics ):
+	"""
+	Convert the depthmap to a 3D point cloud
+
+	Parameters:
+	-----------
+	depth_frame 	 	 : rs.frame()
+						   The depth_frame containing the depth map
+	camera_intrinsics : The intrinsic values of the imager in whose coordinate system the depth_frame is computed
+
+	Return:
+	----------
+	x : array
+		The x values of the pointcloud in meters
+	y : array
+		The y values of the pointcloud in meters
+	z : array
+		The z values of the pointcloud in meters
+
+	"""
+	
+	[height, width] = depth_image.shape
+
+	nx = np.linspace(0, width-1, width)
+	ny = np.linspace(0, height-1, height)
+	u, v = np.meshgrid(nx, ny)
+	x = (u.flatten() - camera_intrinsics.ppx)/camera_intrinsics.fx
+	y = (v.flatten() - camera_intrinsics.ppy)/camera_intrinsics.fy
+
+	z = depth_image.flatten() / 1000;
+	x = np.multiply(x,z)
+	y = np.multiply(y,z)
+
+	x = x[np.nonzero(z)]
+	y = y[np.nonzero(z)]
+	z = z[np.nonzero(z)]
+
+	return np.stack([x, y, z]).transpose()
+
 # 在2D地图上可视化点云，在这里定义grid：直角坐标和极坐标，高度用颜色表示
-def plot_point_cloud(coordinates,polar=False,filename=None):
+def plot_point_cloud(coordinates,mode='rectangular',filename=None,img=None):
     """
     将输入的空间坐标序列可视化到xOy平面上
 
@@ -40,19 +85,30 @@ def plot_point_cloud(coordinates,polar=False,filename=None):
     返回值：
     无
     """
-    fig = plt.figure()
+    fig = plt.figure(figsize=(16,8))
+    
+    plt.subplot(121)
+    plt.imshow(img,cmap='gray')
+    
+    # print(coordinates[:5])
+    selected_coordinates = []
+    for i in range(coordinates.shape[0]):
+        if -0.3 < coordinates[i,1] < 0.5 and coordinates[i,2] < 1.5:
+            selected_coordinates.append(coordinates[i,:])
+    selected_coordinates = np.stack(selected_coordinates)
+    # print(selected_coordinates.shape)
     
     # 从输入数组中提取x和y坐标
-    x = coordinates[:, 0] / 1000
-    y = coordinates[:, 1] / 1000
-    z = coordinates[:, 2] / 1000
+    x = selected_coordinates[:, 0] # / 1000
+    y = selected_coordinates[:, 1] # / 1000
+    z = selected_coordinates[:, 2] # / 1000
 
     
-    if polar:
+    if mode == 'polar':
         r = np.sqrt(x**2+z**2)
         theta = np.arctan2(z,x)        
         
-        plt.subplot(111,projection='polar')
+        ax = plt.subplot(122,projection='polar')
         plt.scatter(theta,r,c=y,cmap='jet',s=1,marker='D',vmin=-2,vmax=3)
         
         # x_range = np.max(r) - np.min(r)
@@ -67,10 +123,12 @@ def plot_point_cloud(coordinates,polar=False,filename=None):
         plt.ylabel('theta (Rotation)')
         plt.colorbar()
         plt.grid()
-    else:
-        plt.subplot(111)
+    elif mode == 'rectangular':
+        ax = plt.subplot(122)
+        ax.set_aspect(1)
         # 绘制散点图
-        plt.scatter(x, z, c=y,cmap='jet',s=1,marker='D',vmin=-2,vmax=3)
+        # plt.scatter(x, z, c=y,cmap='jet',s=1)
+        sca = plt.scatter(x,y,c=z,s=1,vmin=0,vmax=1.5)
 
         # 设置x和y坐标轴的范围
         x_range = np.max(x) - np.min(x)
@@ -78,22 +136,46 @@ def plot_point_cloud(coordinates,polar=False,filename=None):
         # plt.xlim([np.min(x) - 0.1 * x_range, np.max(x) + 0.1 * x_range])
         # plt.ylim([np.min(z) - 0.1 * z_range, np.max(z) + 0.1 * z_range])
         
-        plt.xlim(-4.1,0.1)
-        plt.ylim(-0.1,5.1)
+        # plt.xlim(-4.1,0.1)
+        # plt.ylim(-0.1,5.1)
 
         # 添加标题和坐标轴标签
         plt.title('Coordinates in rectangular Plane')
         plt.xlabel('x (Horizon)')
         plt.ylabel('z (Depth)')
-        plt.colorbar()
+        # plt.colorbar()
+        
+        # 获取颜色条轴
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='3%', pad=0.05)
+
+        # 调整颜色条轴的大小
+        cbar = plt.colorbar(sca, cax=cax)
+        cbar.ax.tick_params(labelsize=8)  # 调整颜色条标签的大小
+
+        plt.grid()
+    
+    elif mode == '3d':
+        ax = plt.subplot(122,projection='3d')
+
+        r = np.sqrt(x**2+z**2)
+        ax.scatter(x,z,y,c=r,cmap='jet')
+        
+        plt.title('Coordinates in 3D')
+        # ax.set_xlim(np.min(x),np.max(x))
+        # ax.set_ylim(np.min(y),np.max(y))
+        # ax.set_zlim(np.min(z),np.max(z))
+        ax.set_xlabel('x (Horizon)')
+        ax.set_zlabel('y (Height)')
+        ax.set_ylabel('z (Depth)')
         plt.grid()
     
     plt.tight_layout()
     if filename is None:
         save_dir = '../fig'
-        filename = 'polar_test' if polar else 'rectangular_test'
+        filename = f'{mode}_test'
     else:
-        save_dir = '../fig/polar' if polar else '../fig/rectangular'
+        save_dir = f'../fig/{mode}'
         filename = filename[:-4]
     plt.savefig(f'{save_dir}/{filename}.png',dpi=300)
     plt.close()
@@ -112,23 +194,34 @@ def fake_intrinsics():
     return intrinsics
 
 if __name__ == '__main__':
+
+    debug = True
+    
     intrinsics = fake_intrinsics()
+    # intrinsics = pickle.load(open('../intr.pkl','rb'))
     
     file_list = os.listdir(data_dir)
     
-    # a_file = file_list[0]
-    # a_depth = get_depth_image(a_file)
-    
-    for filename in tqdm(file_list):
-        a_depth = get_depth_image(filename)
-        _depth_pixel_to_pointcloud = partial(depth_pixel_to_pointcloud,a_depth,intrinsics)
+    point_idx = product(range(80,400,8),range(80,724,8))
+
+    if debug:
+        a_file = file_list[0]
+        # a_depth = np.load(os.path.join('../data_marching/raw', a_file))
+        a_depth = get_depth_image(a_file)
+        # _depth_pixel_to_pointcloud = partial(depth_pixel_to_pointcloud,a_depth,intrinsics)
         
-        # for i, j in product(range(60),range(108)):
-        #     a_coordinate = _depth_pixel_to_pointcloud((i,j))
-        # print(a_coordinate)
-        
-        coordinate_list = map(_depth_pixel_to_pointcloud,product(range(80,400,8),range(80,724,8)))
-        coordinate_list = np.array(list(coordinate_list))
-        # print(coordinate_list.shape) # (6360,3)
-        
-        plot_point_cloud(coordinate_list,polar=False,filename=filename,img=a_depth)
+        # coordinate_list = map(_depth_pixel_to_pointcloud,point_idx)
+        # coordinate_list = np.array(list(coordinate_list))
+        coordinate_list = convert_depth_frame_to_pointcloud(a_depth,intrinsics)
+        print(coordinate_list.shape)
+        plot_point_cloud(coordinate_list,mode='rectangular',filename=None,img=a_depth)
+    else:
+        for filename in tqdm(file_list):
+            a_depth = get_depth_image(filename)
+            _depth_pixel_to_pointcloud = partial(depth_pixel_to_pointcloud,a_depth,intrinsics)
+            
+            coordinate_list = map(_depth_pixel_to_pointcloud,point_idx)
+            coordinate_list = np.array(list(coordinate_list))
+            # print(coordinate_list.shape) # (6360,3)
+            
+            plot_point_cloud(coordinate_list,mode='3d',filename=filename,img=a_depth)
