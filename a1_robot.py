@@ -208,6 +208,7 @@ class A1Robot():
     self.state = 'MARCHING'
     self.detour_mode = 0
     self.detour_clock = -1
+    self.finetune_clock = -1
 
     self.device = device
 

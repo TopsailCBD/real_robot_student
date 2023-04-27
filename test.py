@@ -129,12 +129,32 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                 if min(mid_dea,left_dea,right_dea) < 0.3:
                     # robot.state = 'MARCHING'
                     robot.state = 'FROZEN'
-                    robot.command = command0
+                    robot.command = old_command
                     print('Clear ahead, resume marching')
             
             # If obstacles with close distance appears, adjust to the opposite direction
-            
-            
+            elif min(left_col,mid_col,right_col) > collision_thrd:
+                robot.state = 'FINETUNING'
+                # robot.state = 'FROZEN'
+                robot.finetune_clock = time.time()
+                old_state = robot.state
+                old_command = robot.command
+                # Avoid collision of the front is in priority
+                if max(left_col,right_col) > collision_thrd or mid_col > collision_thrd:
+                    robot.command = command_back
+                # Avoid collision of left side, turn right
+                elif left_col > collision_thrd:
+                    robot.command = command_spin * np.array([1,0,-1])
+                # Avoid collision of right side, turn left
+                elif right_col > collision_thrd:
+                    robot.command = command_spin
+            # Finetuning last for tf seconds
+            elif robot.state == 'FINETUNING':
+                if time.time() - robot.finetune_clock > tf:
+                    robot.state = old_state
+                    robot.command = old_command
+                    robot.finetune_clock = -1
+                    
             # If obstacles with fair distance on all directions, spin
             elif min(mid_dea,left_dea,right_dea) > deadend_thrd:
                 robot.state = 'SPINNING'
@@ -162,8 +182,8 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                         
                     print('Detect obstacle, start detour, direction:',detour_direction)
                     
-                    command0 = robot.command
-                    robot.command = command1 * np.array([1,0,robot.detour_mode])
+                    old_command = robot.command
+                    robot.command = command_deflection * np.array([1,0,robot.detour_mode])
                     print('Change command to',robot.command)
                     
             elif robot.state == 'DETOUR_START':
@@ -171,7 +191,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     robot.state = 'DETOUR_LOOP'
                     robot.detour_clock = time.time()
                     
-                    robot.command = command2 * np.array([1,0,robot.detour_mode])
+                    robot.command = command_detour * np.array([1,0,robot.detour_mode])
                     print('Start step of detour ends.')
                     print('Change command to',robot.command)
                 
@@ -180,16 +200,16 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     robot.state = 'DETOUR_END'
                     robot.detour_clock = time.time()
                     
-                    robot.command = command3 * np.array([1,0,robot.detour_mode])
+                    robot.command = command_deflection * np.array([1,0,robot.detour_mode])
                     print('Loop step of detour ends.')
                     print('Change command to',robot.command)
                     
             elif robot.state == 'DETOUR_END':
                 if time.time() - robot.detour_clock > t3:
                     robot.state = 'MARCHING'
-                    robot.detour_clock = time.time()
+                    robot.detour_clock = -1
                     
-                    robot.command = command0
+                    robot.command = old_command
                     print('End step of detour ends.')
                     print('Change command to',robot.command)
         
@@ -322,6 +342,7 @@ parser.add_argument('--deadend-thrd',type=float, default=0.6)
 parser.add_argument('--collision-thrd',type=float, default=0.3)
 
 parser.add_argument('-v',type=float,default=0.35)
+parser.add_argument('-vb',type=float,default=0.15)
 
 parser.add_argument('-w1',type=float,default=0.24)
 parser.add_argument('-w2',type=float,default=0.16)
@@ -330,9 +351,10 @@ parser.add_argument('-ws',type=float,default=0.40)
 
 parser.add_argument('-t1',type=float,default=2)
 # parser.add_argument('-t2',type=float,default=4)
+parser.add_argument('-tf',type=float,default=0.5)
 parser.add_argument('-tn',type=float,default=1)
 
-parser.add_argument('--tmax',type=float,default=20)
+parser.add_argument('-tmax',type=float,default=20)
 
 args = parser.parse_args()
 
@@ -350,12 +372,11 @@ detour_thrd = args.detour_thrd
 deadend_thrd = args.deadend_thrd
 collision_thrd = args.collision_thrd
 
-command0 = np.array([args.v, 0, 0.01])
-command1 = np.array([args.v, 0, args.w1])
-command2 = np.array([args.v, 0, -args.w2])
-command3 = np.array([args.v, 0, args.w1])
-
-command_spin = np.array([0.01,0,args.ws])
+command_march = np.array([args.v, 0, 0.01])
+command_deflection = np.array([args.v, 0, args.w1])
+command_detour = np.array([args.v, 0, -args.w2])
+command_spin = np.array([0,0,args.ws])
+command_back = np.array([-args.vb,0,0])
 
 # t1,t2,t3 = args.t1, args.t2, args.t1
 
@@ -363,6 +384,7 @@ t1 = args.t1
 t2 = 2 * args.w1 * args.t1 / args.w2
 t3 = args.t1
 tn = args.tn
+tf = args.tf
 tmax = args.tmax
 
 if __name__ == "__main__":
