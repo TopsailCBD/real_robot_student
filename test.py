@@ -5,10 +5,13 @@ import os
 import time
 from datetime import datetime
 from multiprocessing import Process
+from itertools import product
+from functools import partial
 
 import numpy as np
 import pyrealsense2 as rs
 import torch
+import pickle
 
 import depth_image_process as MY_DIP
 from a1_robot import A1Robot, Policy
@@ -251,6 +254,8 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
     profile = cfg.get_stream(rs.stream.depth)
     intr = profile.as_video_stream_profile().get_intrinsics()
     print(intr)
+    # if save_intr:
+    #     pickle.dump(intr, open('../data/intr.pkl', 'wb'))
 
     depth_image = np.frombuffer(shared_depth_image_base, dtype=ctypes.c_double)    
     depth_image = np.reshape(depth_image, (40, 80))
@@ -295,9 +300,18 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
 
         # print(np.asanyarray(depth_frame.get_data()).shape) # (480,848)
         if save_step > 0 and save_flag:
+            raw_depth = np.asanyarray(depth_frame.get_data())
             np.save(
                 f'../data/raw/{last_time}.npy', 
-                np.asanyarray(depth_frame.get_data())
+                raw_depth
+            )
+            point_idx = product(range(80,400,8),range(80,724,8))
+            _depth_pixel_to_pointcloud = partial(depth_pixel_to_pointcloud,raw_depth,intr)
+            coordinate_list = map(_depth_pixel_to_pointcloud,point_idx)
+            coordinate_list = np.array(list(coordinate_list))
+            np.save(
+                f'../data/coordinate/{last_time}.npy',
+                coordinate_list
             )
         
         depth_frame = decimation.process(depth_frame)
@@ -334,13 +348,22 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
 
         if(control_finish[0] > 0.):
             break
-
+        
+def depth_pixel_to_pointcloud(depth_image, intrinsics, depth_pixel):
+    # print(depth_pixel)
+    dis = depth_image[depth_pixel]
+    
+    # if dis == 0 or dis > 30000:
+    #     return [0,0,0]
+    camera_coordinate = rs.rs2_deproject_pixel_to_point(intrinsics, depth_pixel, dis)
+    return camera_coordinate
 
 # ==== Parser Definition ====
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('--no-action', action='store_true')
+# parser.add_argument('--save-intr',action='store_true')
 parser.add_argument('--save-step',type=float,default=-1)
 
 parser.add_argument('--ctr-dist', type=float, default=1)
@@ -372,6 +395,7 @@ args = parser.parse_args()
 # ==== Parse Global Variables ====
 debug = args.debug
 no_action = args.no_action
+# save_intr = args.save_intr
 save_step = args.save_step
 
 ctr_dist = args.ctr_dist
