@@ -106,14 +106,14 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             robot._StepInternal(act)
         
         if debug:
-            # # Test code only for debug
+            # ==== The highest priority: debug ====
             # robot.state = 'DEBUG'
             # robot.command = command_spin
             # print('Command:',robot.command)
             robot.state = 'FROZEN'
             
         elif robot.state is not 'FROZEN':
-            ## Normal test now
+            # ==== Normal test now ====
             # Examine depth image
             three_part_img = MY_DIP.divide_img(depth_image)
             
@@ -123,15 +123,15 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             
             left_col,mid_col,right_col = MY_DIP.ratios_of_three_parts(three_part_img,[collision_dist]*3)
             
-            # If spinning, examine whether can it find a way out
-            if robot.state == 'SPINNING':
-                # print('I am spinning!',robot.command)
-                if min(mid_dea,left_dea,right_dea) < 0.3:
-                    # robot.state = 'MARCHING'
-                    robot.state = 'FROZEN'
+            # ==== The first priority: finetuning to avoid collision ====
+            # Finetuning last for tf seconds
+            if robot.state == 'FINETUNING':
+                if time.time() - robot.finetune_clock > tf:
+                    print('Finetuning finished, resume origin command')
+                    robot.state = old_state
                     robot.command = old_command
-                    print('Clear ahead, resume marching')
-            
+                    robot.finetune_clock = -1
+                    
             # If obstacles with close distance appears, adjust to the opposite direction
             elif min(left_col,mid_col,right_col) > collision_thrd:
                 robot.state = 'FINETUNING'
@@ -141,31 +141,42 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                 old_command = robot.command
                 # Avoid collision of the front is in priority
                 if max(left_col,right_col) > collision_thrd or mid_col > collision_thrd:
+                    print('Detect collision ahead, back off')
                     robot.command = command_back
+                    print('Change command to ',robot.command)
                 # Avoid collision of left side, turn right
                 elif left_col > collision_thrd:
+                    print('Detect collision on the left, turn right')
                     robot.command = command_spin * np.array([1,0,-1])
+                    print('Change command to ',robot.command)
                 # Avoid collision of right side, turn left
                 elif right_col > collision_thrd:
+                    print('Detect collision on the right, turn left')
                     robot.command = command_spin
-            # Finetuning last for tf seconds
-            elif robot.state == 'FINETUNING':
-                if time.time() - robot.finetune_clock > tf:
-                    robot.state = old_state
+                    print('Change command to ',robot.command)
+            
+            # ==== The second priorty: spinning to explore ==== 
+            # If spinning, examine whether can it find a way out
+            if robot.state == 'SPINNING':
+                # print('I am spinning!',robot.command)
+                if min(mid_dea,left_dea,right_dea) < 0.3:
+                    robot.state = 'MARCHING'
+                    # robot.state = 'FROZEN'
                     robot.command = old_command
-                    robot.finetune_clock = -1
+                    print('Clear ahead, resume marching')
                     
             # If obstacles with fair distance on all directions, spin
             elif min(mid_dea,left_dea,right_dea) > deadend_thrd:
                 robot.state = 'SPINNING'
                 # robot.state = 'FROZEN'
-                robot.detour_clock = -1
+                robot.detour_clock = 0
                 robot.detour_mode = 0 # Not detouring
                 
                 robot.command = command_spin
                 print('Obstacles around, spinning to find a way out')
                 print('Change command to',robot.command)
             
+            # ==== The lowest priority: detour to go on the right path ====
             # Other cases, perform detouring as follows
             elif robot.state == 'MARCHING':
                 # If find obstacle. Set command, start clock
@@ -187,7 +198,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     print('Change command to',robot.command)
                     
             elif robot.state == 'DETOUR_START':
-                if time.time() - robot.detour_clock > t1:
+                if robot.detour_mode != 0 and time.time() - robot.detour_clock > t1:
                     robot.state = 'DETOUR_LOOP'
                     robot.detour_clock = time.time()
                     
@@ -196,7 +207,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     print('Change command to',robot.command)
                 
             elif robot.state == 'DETOUR_LOOP':
-                if time.time() - robot.detour_clock > t2:
+                if  robot.detour_mode != 0 and time.time() - robot.detour_clock > t2:
                     robot.state = 'DETOUR_END'
                     robot.detour_clock = time.time()
                     
@@ -205,7 +216,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     print('Change command to',robot.command)
                     
             elif robot.state == 'DETOUR_END':
-                if time.time() - robot.detour_clock > t3:
+                if  robot.detour_mode != 0 and time.time() - robot.detour_clock > t3:
                     robot.state = 'MARCHING'
                     robot.detour_clock = -1
                     
