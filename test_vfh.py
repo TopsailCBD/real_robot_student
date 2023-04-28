@@ -217,7 +217,8 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
             
             resized_depth = cv2.resize(tmp_depth, (848,480), interpolation=cv2.INTER_NEAREST)
 
-            coordinate_list = np.array(list(coordinate_list))
+            coordinate_list = MY_DIP.convert_depth_frame_to_pointcloud_with_args(resized_depth,intr,args)
+            
             np.save(
                 f'../data/coordinate/{last_time}.npy',
                 coordinate_list
@@ -259,8 +260,9 @@ parser.add_argument('--no-action', action='store_true')
 # parser.add_argument('--save-intr',action='store_true')
 parser.add_argument('--save-step',type=float,default=-1)
 
-parser.add_argument('--ctr-dist', type=float, default=1)
-parser.add_argument('--side-dist',type=float, default=1.5)
+# parser.add_argument('--ctr-dist', type=float, default=1)
+# parser.add_argument('--side-dist',type=float, default=1.5)
+parser.add_argument('--detour-dist',type=float, default=1.5)
 parser.add_argument('--deadend-dist',type=float, default=0.8)
 parser.add_argument('--collision-dist',type=float, default=0.3)
 
@@ -280,6 +282,11 @@ parser.add_argument('-t1',type=float,default=2)
 # parser.add_argument('-t2',type=float,default=4)
 parser.add_argument('-tf',type=float,default=0.5)
 parser.add_argument('-tn',type=float,default=1)
+
+parser.add_argument('-ymin',type=float,default=-0.3)
+parser.add_argument('-ymax',type=float,default=0.5)
+parser.add_argument('-zmin',type=float,default=0)
+parser.add_argument('-zmax',type=float,default=1.5)
 
 parser.add_argument('-tmax',type=float,default=20)
 
