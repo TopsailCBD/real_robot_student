@@ -57,41 +57,83 @@ def ratios_of_three_parts(three_img,three_thrd):
 
 # 用rs的example中的函数（手搓的）将深度图转换为点云
 def convert_depth_frame_to_pointcloud(depth_image, camera_intrinsics ):
-	"""
-	Convert the depthmap to a 3D point cloud
+    """
+    Convert the depthmap to a 3D point cloud
 
-	Parameters:
-	-----------
-	depth_frame 	 	 : rs.frame()
-						   The depth_frame containing the depth map
-	camera_intrinsics : The intrinsic values of the imager in whose coordinate system the depth_frame is computed
+    Parameters:
+    -----------
+    depth_frame 	 	 : rs.frame()
+                           The depth_frame containing the depth map
+    camera_intrinsics : The intrinsic values of the imager in whose coordinate system the depth_frame is computed
 
-	Return:
-	----------
-	x : array
-		The x values of the pointcloud in meters
-	y : array
-		The y values of the pointcloud in meters
-	z : array
-		The z values of the pointcloud in meters
+    Return:
+    ----------
+    x : array
+        The x values of the pointcloud in meters
+    y : array
+        The y values of the pointcloud in meters
+    z : array
+        The z values of the pointcloud in meters
 
-	"""
-	
-	[height, width] = depth_image.shape
+    """
+    
+    [height, width] = depth_image.shape
 
-	nx = np.linspace(0, width-1, width)
-	ny = np.linspace(0, height-1, height)
-	u, v = np.meshgrid(nx, ny)
-	x = (u.flatten() - camera_intrinsics.ppx)/camera_intrinsics.fx
-	y = (v.flatten() - camera_intrinsics.ppy)/camera_intrinsics.fy
+    nx = np.linspace(0, width-1, width)
+    ny = np.linspace(0, height-1, height)
+    u, v = np.meshgrid(nx, ny)
+    x = (u.flatten() - camera_intrinsics.ppx)/camera_intrinsics.fx
+    y = (v.flatten() - camera_intrinsics.ppy)/camera_intrinsics.fy
 
-	z = depth_image.flatten() / 1000;
-	x = np.multiply(x,z)
-	y = np.multiply(y,z)
+    z = depth_image.flatten() / 1000;
+    x = np.multiply(x,z)
+    y = np.multiply(y,z)
 
-	x = x[np.nonzero(z)]
-	y = y[np.nonzero(z)]
-	z = z[np.nonzero(z)]
+    x = x[np.nonzero(z)]
+    y = y[np.nonzero(z)]
+    z = z[np.nonzero(z)]
 
-	return np.stack([x, y, z]).transpose()
+    return np.stack([x, y, z]).transpose()
 
+# 用rs的example中的函数（手搓的）将深度图转换为点云
+def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, args ):
+    """
+    Convert the depthmap to a 3D point cloud, save keypoints with in proper range only.
+
+    :param depth_image: array (H,W), depth image, scale:mm.
+    :param camera_intrinsics: rs.pyrealsense2.intrinsics, The intrinsic values of the imager in whose coordinate system the depth_frame is computed.
+    :param args: dict, argparse in the main file.
+
+    :return coordinates: array (N,3): ([x0,y0,z0],[x1,y1,z1],...)
+    - x: array, horizon
+    - y: array, height
+    - z: array, depth
+    """
+    
+    [height, width] = depth_image.shape
+
+    nx = np.linspace(0, width-1, width)
+    ny = np.linspace(0, height-1, height)
+    
+    u, v = np.meshgrid(nx, ny)
+    z = depth_image.flatten() / 1000;
+    
+    z_idx = np.where(args.z_min < z <= args.z_max)
+    
+    u = u.flatten()[z_idx]
+    v = v.flatten()[z_idx]
+    z = z[z_idx]
+    
+    x = (u - camera_intrinsics.ppx)/camera_intrinsics.fx
+    y = (v - camera_intrinsics.ppy)/camera_intrinsics.fy
+
+    y_idx = np.where(args.y_min < y <= args.y_max)
+    
+    x = x[y_idx]
+    y = y[y_idx]
+    z = z[y_idx]
+
+    x = np.multiply(x,z)
+    y = np.multiply(y,z)
+
+    return np.stack([x, y, z]).transpose()
