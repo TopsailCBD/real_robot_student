@@ -45,6 +45,18 @@ def ratios_of_three_parts(three_img,three_thrd):
     return [ratio_of_obstacle(img,thrd) for img,thrd in zip(three_img,three_thrd)]
 
 
+def calculate_d_range(intr,shape=(60,108),origin_cv_shape = (848,480), pad=((10,10),(10,18)), depth_thrd=1.5):
+    (pad_u, pad_d),(pad_l,pad_r) = pad
+    fake_depth = np.zeros(shape)
+    fake_depth[pad_u+1:-pad_d,pad_l+1] = depth_thrd * 1000
+    fake_depth[pad_u+1:-pad_d,-pad_r-1] = depth_thrd * 1000
+    
+    resized_fake_depth = cv2.resize(fake_depth, origin_cv_shape, interpolation=cv2.INTER_NEAREST)
+    x_range_coordinate = convert_depth_frame_to_pointcloud(resized_fake_depth,intr)
+    
+    x = x_range_coordinate[:,0]
+    return min(x),max(x)
+
 # # 用rs的函数将深度图转换为点云，broken
 # def depth_pixel_to_pointcloud(depth_image, intrinsics, depth_pixel):
 #     # print(depth_pixel)
@@ -95,7 +107,7 @@ def convert_depth_frame_to_pointcloud(depth_image, camera_intrinsics ):
 
     return np.stack([x, y, z]).transpose()
 
-# 用rs的example中的函数（手搓的）将深度图转换为点云
+# 用rs的example中的函数（手搓的）将深度图转换为点云，而且传参数
 def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, args ):
     """
     Convert the depthmap to a 3D point cloud, save keypoints with in proper range only.
