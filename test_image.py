@@ -9,6 +9,7 @@ import pyrealsense2 as rs
 from tqdm import tqdm
 import pickle
 
+import depth_image_process as MY_DIP
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 data_dir = "../data_marching/tmp"
@@ -25,54 +26,6 @@ def get_depth_image(file):
     # print(resized_depth.shape)
     return resized_depth
     
-# 将深度图转换为点云
-def depth_pixel_to_pointcloud(depth_image, intrinsics, depth_pixel):
-    # print(depth_pixel)
-    dis = depth_image[depth_pixel]
-    
-    # if dis == 0 or dis > 30000:
-    #     return [0,0,0]
-    camera_coordinate = rs.rs2_deproject_pixel_to_point(intrinsics, depth_pixel, dis)
-    return camera_coordinate
-
-def convert_depth_frame_to_pointcloud(depth_image, camera_intrinsics ):
-	"""
-	Convert the depthmap to a 3D point cloud
-
-	Parameters:
-	-----------
-	depth_frame 	 	 : rs.frame()
-						   The depth_frame containing the depth map
-	camera_intrinsics : The intrinsic values of the imager in whose coordinate system the depth_frame is computed
-
-	Return:
-	----------
-	x : array
-		The x values of the pointcloud in meters
-	y : array
-		The y values of the pointcloud in meters
-	z : array
-		The z values of the pointcloud in meters
-
-	"""
-	
-	[height, width] = depth_image.shape
-
-	nx = np.linspace(0, width-1, width)
-	ny = np.linspace(0, height-1, height)
-	u, v = np.meshgrid(nx, ny)
-	x = (u.flatten() - camera_intrinsics.ppx)/camera_intrinsics.fx
-	y = (v.flatten() - camera_intrinsics.ppy)/camera_intrinsics.fy
-
-	z = depth_image.flatten() / 1000;
-	x = np.multiply(x,z)
-	y = np.multiply(y,z)
-
-	x = x[np.nonzero(z)]
-	y = y[np.nonzero(z)]
-	z = z[np.nonzero(z)]
-
-	return np.stack([x, y, z]).transpose()
 
 # 在2D地图上可视化点云，在这里定义grid：直角坐标和极坐标，高度用颜色表示
 def plot_point_cloud(coordinates,mode='rectangular',filename=None,img=None):
@@ -206,22 +159,25 @@ if __name__ == '__main__':
 
     if debug:
         a_file = file_list[0]
+        
         # a_depth = np.load(os.path.join('../data_marching/raw', a_file))
         a_depth = get_depth_image(a_file)
-        # _depth_pixel_to_pointcloud = partial(depth_pixel_to_pointcloud,a_depth,intrinsics)
         
+        # _depth_pixel_to_pointcloud = partial(depth_pixel_to_pointcloud,a_depth,intrinsics)
         # coordinate_list = map(_depth_pixel_to_pointcloud,point_idx)
         # coordinate_list = np.array(list(coordinate_list))
-        coordinate_list = convert_depth_frame_to_pointcloud(a_depth,intrinsics)
-        print(coordinate_list.shape)
+        
+        coordinate_list = MY_DIP.convert_depth_frame_to_pointcloud(a_depth,intrinsics)
+        # print(coordinate_list.shape)
         plot_point_cloud(coordinate_list,mode='rectangular',filename=None,img=a_depth)
     else:
         for filename in tqdm(file_list):
             a_depth = get_depth_image(filename)
-            _depth_pixel_to_pointcloud = partial(depth_pixel_to_pointcloud,a_depth,intrinsics)
             
-            coordinate_list = map(_depth_pixel_to_pointcloud,point_idx)
-            coordinate_list = np.array(list(coordinate_list))
+            # _depth_pixel_to_pointcloud = partial(depth_pixel_to_pointcloud,a_depth,intrinsics)
+            # coordinate_list = map(_depth_pixel_to_pointcloud,point_idx)
+            # coordinate_list = np.array(list(coordinate_list))
             # print(coordinate_list.shape) # (6360,3)
             
+            coordinate_list = MY_DIP.convert_depth_frame_to_pointcloud(a_depth,intrinsics)            
             plot_point_cloud(coordinate_list,mode='3d',filename=filename,img=a_depth)

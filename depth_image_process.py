@@ -44,3 +44,54 @@ def ratio_of_obstacle(depth_img,depth_thrd):
 def ratios_of_three_parts(three_img,three_thrd):
     return [ratio_of_obstacle(img,thrd) for img,thrd in zip(three_img,three_thrd)]
 
+
+# # 用rs的函数将深度图转换为点云，broken
+# def depth_pixel_to_pointcloud(depth_image, intrinsics, depth_pixel):
+#     # print(depth_pixel)
+#     dis = depth_image[depth_pixel]
+    
+#     # if dis == 0 or dis > 30000:
+#     #     return [0,0,0]
+#     camera_coordinate = rs.rs2_deproject_pixel_to_point(intrinsics, depth_pixel, dis)
+#     return camera_coordinate
+
+# 用rs的example中的函数（手搓的）将深度图转换为点云
+def convert_depth_frame_to_pointcloud(depth_image, camera_intrinsics ):
+	"""
+	Convert the depthmap to a 3D point cloud
+
+	Parameters:
+	-----------
+	depth_frame 	 	 : rs.frame()
+						   The depth_frame containing the depth map
+	camera_intrinsics : The intrinsic values of the imager in whose coordinate system the depth_frame is computed
+
+	Return:
+	----------
+	x : array
+		The x values of the pointcloud in meters
+	y : array
+		The y values of the pointcloud in meters
+	z : array
+		The z values of the pointcloud in meters
+
+	"""
+	
+	[height, width] = depth_image.shape
+
+	nx = np.linspace(0, width-1, width)
+	ny = np.linspace(0, height-1, height)
+	u, v = np.meshgrid(nx, ny)
+	x = (u.flatten() - camera_intrinsics.ppx)/camera_intrinsics.fx
+	y = (v.flatten() - camera_intrinsics.ppy)/camera_intrinsics.fy
+
+	z = depth_image.flatten() / 1000;
+	x = np.multiply(x,z)
+	y = np.multiply(y,z)
+
+	x = x[np.nonzero(z)]
+	y = y[np.nonzero(z)]
+	z = z[np.nonzero(z)]
+
+	return np.stack([x, y, z]).transpose()
+
