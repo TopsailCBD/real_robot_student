@@ -3,9 +3,12 @@ import pyrealsense2 as rs
 
 # Never import matplotlib here.
 
-def fake_intrinsics():
+def fake_intrinsics(edition='default'):
     # [ 848x480  p[424.337 239.504]  f[421.504 421.504]  Brown Conrady [0 0 0 0 0] ]
-    intrinsics = rs.pyrealsense2.intrinsics()
+    if edition == 'default':
+        intrinsics = rs.pyrealsense2.intrinsics()
+    elif edition == 'a1':
+        intrinsics = rs.intrinsics()
     intrinsics.width = 848
     intrinsics.height = 480
     intrinsics.ppx = 424.337
@@ -25,7 +28,7 @@ def calculate_from_d(d,v,w):
     :return t: float or array, the time cost of this move
     '''
     radius = v / w
-    cosine = 1 - d/2*radius
+    cosine = 1 - np.abs(d)/2*radius
     theta = np.arccos(cosine)
     sine = np.sin(theta)
     l = 2 * radius * sine

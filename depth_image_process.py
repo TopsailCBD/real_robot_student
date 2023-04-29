@@ -57,6 +57,30 @@ def calculate_d_range(intr,shape=(60,108),origin_cv_shape = (848,480), pad=((10,
     x = x_range_coordinate[:,0]
     return min(x),max(x)
 
+def calculate_bucket_from_args(intr,args=None):
+    '''
+    Calculate static parameters of Vector Field from args.
+    :param intr: rs.intrinsics()
+    :param args: argparse.Namespace()
+    :return num_buckets: int, number of buckets
+    :return bucket_start: float, d at the 0th bucket
+    :return bucket_left_hand: int, shift of index from 0th bucket to d=0
+    '''
+    assert args is not None
+    pad_u,pad_d,pad_l,pad_r = args.pad
+    dmin,dmax = calculate_d_range(intr,pad=((pad_u,pad_d),(pad_l,pad_r)),depth_thrd=args.zmax)
+    
+    dmin_idx = np.ceil(dmin/args.xscale) # The 0th bucket
+    dmax_idx = np.floor(dmax/args.xscale) # The highest bucket
+    
+    num_buckets = int(dmax_idx - dmin_idx + 1) # Number of buckets, length of vector field
+    bucket_start = dmin_idx * args.xscale # d at the 0th bucket
+    bucket_left_hand = int(dmin_idx) # Shift of index from 0th bucket to d=0
+    
+    print('[DIP] Calculate bucket list: num_buckets =',num_buckets,'bucket_start =',bucket_start,'bucket_left_hand =',bucket_left_hand)
+    
+    return num_buckets,bucket_start,bucket_left_hand
+
 # # 用rs的函数将深度图转换为点云，broken
 # def depth_pixel_to_pointcloud(depth_image, intrinsics, depth_pixel):
 #     # print(depth_pixel)
@@ -108,12 +132,13 @@ def convert_depth_frame_to_pointcloud(depth_image, camera_intrinsics ):
     return np.stack([x, y, z]).transpose()
 
 # 用rs的example中的函数（手搓的）将深度图转换为点云，而且传参数
-def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, args ):
+def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, scale='mm',args=None ):
     """
     Convert the depthmap to a 3D point cloud, save keypoints with in proper range only.
 
     :param depth_image: array (H,W), depth image, scale:mm.
     :param camera_intrinsics: rs.pyrealsense2.intrinsics, The intrinsic values of the imager in whose coordinate system the depth_frame is computed.
+    :param scale: str, scale of depth image, 'mm' or 'm'.
     :param args: dict, argparse in the main file.
 
     :return coordinates: array (N,3): ([x0,y0,z0],[x1,y1,z1],...)
@@ -128,7 +153,11 @@ def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, 
     ny = np.linspace(0, height-1, height)
     
     u, v = np.meshgrid(nx, ny)
-    z = depth_image.flatten() / 1000;
+    
+    if scale == 'mm':
+        z = depth_image.flatten() / 1000
+    else:
+        z = depth_image.flatten()
     
     z_idx = np.where((args.zmin < z) & (z <= args.zmax))
     

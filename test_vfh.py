@@ -16,7 +16,7 @@ import torch
 
 import depth_image_process as MY_DIP
 from a1_robot import A1Robot, Policy
-from plot_utils import calculate_from_d, longest_zero_sequence
+from plot_utils import calculate_from_d, longest_zero_sequence, fake_intrinsics
 
 
 def GetAction(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base):
@@ -63,6 +63,8 @@ def GetAction(shared_obs_base, shared_act_base, control_finish_base,reset_finish
 
 
 def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, shared_vector_field_base, control_loop_time):
+    global intr,num_buckets,bucket_start,bucket_left_hand
+    
     time.sleep(4)
     obs = np.frombuffer(shared_obs_base, dtype=ctypes.c_double)
     act = np.frombuffer(shared_act_base, dtype=ctypes.c_double)
@@ -135,10 +137,10 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                 robot.command = old_command
                 print('Change command to',robot.command)  
             
-        else:
+        elif robot.state == 'MARCHING':
             # ==== Calculate shift length on horizontal direction ====
-            available_vector_field = vector_field[:int(vector_field[-1])]
-            zero_start,zero_end = longest_zero_sequence(available_vector_field)
+            
+            zero_start,zero_end = longest_zero_sequence(vector_field)
             zero_middle = (zero_start + zero_end) / 2
             d = bucket_start + zero_middle * xscale
             l,ts = calculate_from_d(d,args.v,args.w)
@@ -154,11 +156,13 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                 detour_direction = 'left'
                 
             print('VFH calculated, start detour, direction:',detour_direction)
-            print('d =',d,'l =',l,'ts =',ts)
+            print('no-obstacle:',(zero_start,zero_end),'d =',d,'l =',l,'ts =',ts)
             
             old_command = robot.command
             robot.command = command_detour * np.array([1,0,robot.detour_mode])
             print('Change command to',robot.command)
+        
+        # print(robot.state,robot.command)
         
         obs[:] = robot.ConstructObservation()
 
@@ -268,9 +272,10 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
             break
         
 def GetVFH(shared_depth_image_base, shared_vector_field_base, control_finish_base):
-    while intr is None:
-        time.sleep(0.001)  
+    global intr,num_buckets,bucket_start,bucket_left_hand
+    # Preprocess()
     print('[GetVFH] Get global intrinsics:',intr)
+    print('[GetVFH] Get bucket list: num_buckets =',num_buckets,'bucket_start =',bucket_start,'bucket_left_hand =',bucket_left_hand)
     
     # ==== Get depth image ====
     depth_image = np.frombuffer(shared_depth_image_base, dtype=ctypes.c_double)    
@@ -288,71 +293,56 @@ def GetVFH(shared_depth_image_base, shared_vector_field_base, control_finish_bas
         while(last_time + 0.1 - time.time() > 0.):
             time.sleep(0.001)
             
+        last_time = time.time()
+        
         if save_step > 0:
             save_flag = False
             if last_time - last_save > save_step:
                 last_save = last_time
                 save_flag = True
-                print('Would save images.',last_time)
+                print('Would save coordinates.',last_time)
         
         # ==== Get point cloud from depth image ====
-        depth_image = np.pad(depth_image, ((pad_u,pad_d),(pad_l,pad_r)), 'constant', constant_values=0) # (60,108)
-        # print(tmp_depth.shape)
-        resized_depth = cv2.resize(depth_image, (848,480), interpolation=cv2.INTER_NEAREST) # (480,848)
-
-        coordinate_list = MY_DIP.convert_depth_frame_to_pointcloud_with_args(resized_depth,intr,args)
+        # print('[GetVFH] From buffer:',depth_image.shape) # (40,80)
+        padded_depth = np.pad(depth_image, ((pad_u,pad_d),(pad_l,pad_r)), 'constant', constant_values=0) # (60,108)
+        # print('[GetVFH] After padding:',padded_depth.shape) # (60,108)
+        resized_depth = cv2.resize(padded_depth, (848,480), interpolation=cv2.INTER_NEAREST) # (480,848)
+        # print('[GetVFH] Used in pc:',resized_depth.shape) # (480,848)
+        
+        coordinate_list = MY_DIP.convert_depth_frame_to_pointcloud_with_args(resized_depth,intr,scale='m',args=args)
         
         if save_step > 0 and save_flag:
             np.save(
                 f'../data/coordinate/{last_time}.npy',
                 coordinate_list
             )
-            
+        # print('[GetVFH] coordinate_list',coordinate_list.shape)
+        
         # ==== Get navigate direction from point cloud ====
         bucket_thrd = coordinate_list.shape[0] / num_buckets * occupied_thrd
         
-        dbuckets = np.zeros((num_buckets))
-        for coordinate in coordinate_list:
-            bucket_idx = np.floor(coordinate[0]/xscale) - bucket_left_hand
-            dbuckets[bucket_idx] += 1
+        # dbuckets = np.zeros((num_buckets))
+        # for coordinate in coordinate_list:
+        #     bucket_idx = int(np.floor(coordinate[0]/xscale) - bucket_left_hand)
+        #     dbuckets[bucket_idx] += 1
+            
+        dbuckets, bin_edges = np.histogram(
+            coordinate_list[:,0],
+            bins=num_buckets,
+            range=(bucket_left_hand * xscale, (bucket_left_hand + num_buckets) * xscale)
+        )
+        
+        # if save_step > 0 and save_flag:
+        #     print(dbuckets, bucket_thrd)
+        
         dbuckets[dbuckets < bucket_thrd] = 0
         
         # ==== Publish vector field ====
-        vector_field[:num_buckets] = dbuckets[:]
-        vector_field[-1] = num_buckets
+        vector_field[:] = dbuckets[:]
         
         # ==== End control ====    
         if(control_finish[0] > 0.):
             break
-        
-def Preprocess():
-    global intr,num_buckets,bucket_start,bucket_left_hand
-    
-    # ==== Configure depth and color streams ====
-    pipeline = rs.pipeline()
-    config = rs.config()
-    config.enable_stream(rs.stream.depth, rs.format.z16, 30)
-    config.enable_stream(rs.stream.color, rs.format.bgr8, 30)
-    
-    # ==== Get camera intrinsics ====
-    cfg = pipeline.start(config)
-    
-    time.sleep(1)
-    profile = cfg.get_stream(rs.stream.depth)
-    intr = profile.as_video_stream_profile().get_intrinsics()
-    print('[Preprocess] Read intrinsics:',intr)
-
-    # ==== Calculate range in horizontal direction ====
-    dmin,dmax = MY_DIP.calculate_d_range(intr,pad=((pad_u,pad_d),(pad_l,pad_r)),depth_thrd=args.zmax)
-    
-    dmin_idx = np.floor(dmin/xscale) # The 0th bucket
-    dmax_idx = np.floor(dmax/xscale) # The highest bucket
-    
-    num_buckets = int(dmax_idx - dmin_idx + 1) # Number of buckets, length of vector field
-    bucket_start = dmin_idx * xscale # d at the 0th bucket
-    bucket_left_hand = dmin_idx # Shift of index from 0th bucket to d=0
-    
-    print('[Preprocess] Calculate bucket list: num_buckets =',num_buckets,'bucket_start =',bucket_start,'bucket_left_hand =',bucket_left_hand)
     
 # ==== Parser Definition ====
 parser = argparse.ArgumentParser()
@@ -394,10 +384,8 @@ parser.add_argument('-zmax',type=float,default=1.5)
 parser.add_argument('-tmax',type=float,default=20)
 
 args = parser.parse_args()
-intr = None
-num_buckets = -1
-bucket_start = 0
-bucket_left_hand = -1
+intr = fake_intrinsics(edition='a1')
+num_buckets, bucket_start, bucket_left_hand = MY_DIP.calculate_bucket_from_args(intr,args)
 
 # ==== Parse Global Variables ====
 debug = args.debug
@@ -427,7 +415,7 @@ tf = args.tf
 tmax = args.tmax
 
 if __name__ == "__main__":
-       
+    
     # ==== Shared Variabes ====
     torch.multiprocessing.set_start_method('spawn')
     shared_act_base = multiprocessing.Array(
@@ -437,7 +425,7 @@ if __name__ == "__main__":
     shared_depth_image_base = multiprocessing.Array(
         ctypes.c_double, 40 * 80, lock=False)
     shared_vector_field_base = multiprocessing.Array(
-        ctypes.c_double, 100, lock=False)
+        ctypes.c_double, num_buckets, lock=False)
     control_finish_base = multiprocessing.Array(
         ctypes.c_double, 1, lock=False)
     reset_finish_base = multiprocessing.Array(
@@ -448,8 +436,6 @@ if __name__ == "__main__":
     act = np.frombuffer(shared_act_base, dtype=ctypes.c_double)
     act[:] = np.zeros(12)
     obs[:] = np.zeros(48)
-
-    Preprocess()
     
     # Add shared depth image to RobotControl
     p1 = Process(target=RobotControl, args=(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, shared_vector_field_base, tmax,))
