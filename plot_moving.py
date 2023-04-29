@@ -1,33 +1,17 @@
 import os
 
-import numpy as np
-import matplotlib.pyplot as plt
-import pyrealsense2 as rs
 import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import pyrealsense2 as rs
 
 import depth_image_process as MY_DIP
-from plot_pointcloud import fake_intrinsics
 from depth_image_process import calculate_d_range
+from plot_utils import calculate_from_d, fake_intrinsics
 
 intr = fake_intrinsics()
 _v = 0.35
 _w = 0.2
-
-def calculate_from_d(d,v,w):
-    '''
-    :param d: float or array, distance from the center of the robot to the target
-    :param v: float, linear velocity
-    :param w: float, angular velocity
-    :return l: float or array, the length the robot would move front on z-axis
-    :return t: float or array, the time cost of this move
-    '''
-    radius = v / w
-    cosine = 1 - d/2*radius
-    theta = np.arccos(cosine)
-    sine = np.sin(theta)
-    l = 2 * radius * sine
-    t = w / theta
-    return l,t
 
 def plot_d_to_other_plots(d_min,dmax):
     d_range = np.linspace(d_min,dmax,100)

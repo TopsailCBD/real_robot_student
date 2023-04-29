@@ -1,4 +1,5 @@
 import os
+import pickle
 from functools import partial
 from itertools import product
 
@@ -6,11 +7,11 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import pyrealsense2 as rs
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from tqdm import tqdm
-import pickle
 
 import depth_image_process as MY_DIP
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+from plot_utils import fake_intrinsics
 
 data_dir = "../data_marching/tmp"
 out_dir = "../fig/rectangular"
@@ -133,18 +134,6 @@ def plot_point_cloud(coordinates,mode='rectangular',filename=None,img=None):
     plt.savefig(f'{save_dir}/{filename}.png',dpi=300)
     plt.close()
 
-def fake_intrinsics():
-    # [ 848x480  p[424.337 239.504]  f[421.504 421.504]  Brown Conrady [0 0 0 0 0] ]
-    intrinsics = rs.pyrealsense2.intrinsics()
-    intrinsics.width = 848
-    intrinsics.height = 480
-    intrinsics.ppx = 424.337
-    intrinsics.ppy = 239.504
-    intrinsics.fx = 421.504
-    intrinsics.fy = 421.504
-    intrinsics.model = rs.distortion.brown_conrady
-    print(intrinsics)
-    return intrinsics
 
 if __name__ == '__main__':
 

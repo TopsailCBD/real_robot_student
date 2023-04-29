@@ -2,22 +2,21 @@ import argparse
 import ctypes
 import multiprocessing
 import os
+import pickle
 import time
 from datetime import datetime
-from multiprocessing import Process
-from itertools import product
 from functools import partial
+from itertools import product
+from multiprocessing import Process
 
+import cv2
 import numpy as np
 import pyrealsense2 as rs
 import torch
-import pickle
-import cv2
 
 import depth_image_process as MY_DIP
-from plot_vector_field import longest_zero_sequence
-from plot_moving import calculate_from_d
 from a1_robot import A1Robot, Policy
+from plot_utils import calculate_from_d, longest_zero_sequence
 
 
 def GetAction(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base):
@@ -155,6 +154,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                 detour_direction = 'left'
                 
             print('VFH calculated, start detour, direction:',detour_direction)
+            print('d =',d,'l =',l,'ts =',ts)
             
             old_command = robot.command
             robot.command = command_detour * np.array([1,0,robot.detour_mode])
@@ -347,7 +347,7 @@ parser.add_argument('--collision-thrd',type=float, default=0.3)
 
 parser.add_argument('--occupied-thrd',type=float, default=0.5)
 
-parser.add_argument('-pad',type=list,nargs=4,type=int,default=[10,10,10,18])
+parser.add_argument('-pad',type=list,nargs=4,default=[10,10,10,18])
 
 parser.add_argument('-v',type=float,default=0.35)
 parser.add_argument('-vb',type=float,default=0.15)
