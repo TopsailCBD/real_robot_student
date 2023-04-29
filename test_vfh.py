@@ -16,7 +16,8 @@ import torch
 
 import depth_image_process as MY_DIP
 from a1_robot import A1Robot, Policy
-from plot_utils import calculate_from_d, longest_zero_sequence, fake_intrinsics
+from plot_utils import (calculate_from_d, calculate_from_d_smooth,
+                        fake_intrinsics, longest_zero_sequence)
 
 
 def GetAction(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base):
@@ -112,6 +113,12 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             robot._StepInternal(np.zeros(12))
         else:
             robot._StepInternal(act)
+            
+        vector_collision, vector_close, vector_detour = np.split(vector_field,3)
+        
+        need_spin_flag = np.count_nonzero(vector_collision[head_left_idx:head_right_idx]) >= num_head_buckets * collision_thrd
+        need_detour_flag = np.count_nonzero(vector_close[head_left_idx:head_right_idx]) >= num_head_buckets * collision_thrd
+        should_march_flag = np.count_nonzero(vector_detour[head_left_idx:head_right_idx]) < num_head_buckets * collision_thrd
         
         if debug:
             # ==== The highest priority: debug ====
@@ -119,48 +126,96 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             # robot.command = command_spin
             # print('Command:',robot.command)
             robot.state = 'FROZEN'
+        
         elif robot.state == 'VFH_1':
-            if robot.detour_mode != 0 and time.time() - robot.detour_clock > ts:
-                robot.state = 'VFH_2'
-                print('First step of VFH ends.')
-                
-                robot.detour_clock = time.time()
-                robot.command = command_detour * np.array([1,0,-robot.detour_mode])
-                print('Change command to',robot.command)
-                
+            if smooth:           
+                if robot.detour_mode != 0 and time.time() - robot.detour_clock > td:
+                    robot.state = 'VFH_3'
+                    print('Part I of smooth VFH ends.')
+                    
+                    robot.detour_clock = time.time()
+                    robot.command = command_detour * np.array([1,0,-robot.detour_mode])
+                    print('Change command to',robot.command)
+            else:
+                if robot.detour_mode != 0 and time.time() - robot.detour_clock > ts and should_march_flag:
+                    ts = time.time()
+                    robot.state = 'VFH_2'
+                    print('Part I of harsh VFH ends.')
+                    
+                    robot.detour_clock = time.time()
+                    robot.command = command_march
+                    print('Change command to',robot.command)
+                    
         elif robot.state == 'VFH_2':
-            if robot.detour_mode != 0 and time.time() - robot.detour_clock > ts:
-                robot.state = 'MARCHING'
-                print('Second step of VFH ends.')
-                
-                robot.detour_clock = time.time()
-                robot.command = old_command
-                print('Change command to',robot.command)  
+            if smooth:
+                raise NotImplementedError
+            else:
+                 if robot.detour_mode != 0 and time.time() - robot.detour_clock > tm:
+                    robot.state = 'VFH_3'
+                    print('Part II of harsh VFH ends.')
+                    
+                    robot.detour_clock = time.time()
+                    robot.command = command_spin * np.array([1,0,-robot.detour_mode])
+                    print('Change command to',robot.command)               
+        
+        elif robot.state == 'VFH_3':
+            if smooth:
+                if robot.detour_mode != 0 and time.time() - robot.detour_clock > td:
+                    robot.state = 'MARCHING'
+                    # robot.state = 'FROZEN'
+                    print('Part II of smooth VFH ends.')
+                    
+                    robot.detour_clock = time.time()
+                    robot.command = command_march
+                    print('Change command to',robot.command)  
+            else:
+                if robot.detour_mode != 0 and time.time() - robot.detour_clock > ts:
+                    robot.state = 'MARCHING'
+                    print('Part III of harsh VFH ends.')
+                    
+                    robot.detour_clock = time.time()
+                    robot.command = command_march
+                    print('Change command to',robot.command)                     
+                    
             
         elif robot.state == 'MARCHING':
             # ==== Calculate shift length on horizontal direction ====
-            
-            zero_start,zero_end = longest_zero_sequence(vector_field)
-            zero_middle = (zero_start + zero_end) / 2
-            d = bucket_start + zero_middle * xscale
-            l,ts = calculate_from_d(d,args.v,args.w)
-            
-            robot.state = 'VFH_1'
-            robot.detour_clock = time.time()
-            
-            if d > 0:
-                robot.detour_mode = -1 # Turn right first
-                detour_direction = 'right'
-            else:
-                robot.detour_mode = 1 # Turn left first
-                detour_direction = 'left'
+            if need_detour_flag:
+                zero_start,zero_end = longest_zero_sequence(vector_detour)
                 
-            print('VFH calculated, start detour, direction:',detour_direction)
-            print('no-obstacle:',(zero_start,zero_end),'d =',d,'l =',l,'ts =',ts)
-            
-            old_command = robot.command
-            robot.command = command_detour * np.array([1,0,robot.detour_mode])
-            print('Change command to',robot.command)
+                if zero_end - zero_start < len(vector_detour) * deadend_thrd:
+                    robot.state = 'SPINNING'
+                    robot.command = command_spin
+                
+                else:
+                    zero_middle = (zero_start + zero_end) / 2 
+                    d = bucket_start + zero_middle * xscale
+                    
+                    if d > 0:
+                        robot.detour_mode = -1 # Turn right first
+                        detour_direction = 'right'
+                    else:
+                        robot.detour_mode = 1 # Turn left first
+                        detour_direction = 'left'
+                    
+                    robot.state = 'VFH_1'
+                    robot.detour_clock = time.time()
+                    
+                    if smooth:
+                        td, l = calculate_from_d_smooth(d,args.v,args.w)
+                            
+                        print('VFH calculated, start detour, direction:',detour_direction)
+                        print('no-obstacle:',(zero_start,zero_end),'d =',d,'l =',l,'td =',td)
+
+                        robot.command = command_detour * np.array([1,0,robot.detour_mode])
+                    else:
+                        ts, tm = calculate_from_d(d,args.v,args.w,args.z2)
+                        print('VFH calculated, start detour, direction:',detour_direction)
+                        print('no-obstacle:',(zero_start,zero_end),'d =',d,'ts =',ts,'tm =',tm)
+
+                        robot.command = command_spin * np.array([1,0,robot.detour_mode])
+                        
+                print('Change command to',robot.command)
         
         # print(robot.state,robot.command)
         
@@ -325,20 +380,26 @@ def GetVFH(shared_depth_image_base, shared_vector_field_base, control_finish_bas
         # for coordinate in coordinate_list:
         #     bucket_idx = int(np.floor(coordinate[0]/xscale) - bucket_left_hand)
         #     dbuckets[bucket_idx] += 1
+        
+        coordinate_z3 = coordinate_list
+        coordinate_z2 = coordinate_z3[coordinate_z3[:,2] < args.z2]
+        coordinate_z1 = coordinate_z2[coordinate_z2[:,2] < args.z1]
+        # coordinate_z2 = filter(lambda x: x[2] < args.z2, coordinate_z3)
+        # coordinate_z1 = filter(lambda x: x[2] < args.z1, coordinate_z2)
+        
+        hierarchical_dbuckets = []
+        for coordinates in (coordinate_z1,coordinate_z2,coordinate_z3):
+            dbuckets, bin_edges = np.histogram(
+                coordinates[:,0],
+                bins=num_buckets,
+                range=(bucket_left_hand * xscale, (bucket_left_hand + num_buckets) * xscale)
+            )
             
-        dbuckets, bin_edges = np.histogram(
-            coordinate_list[:,0],
-            bins=num_buckets,
-            range=(bucket_left_hand * xscale, (bucket_left_hand + num_buckets) * xscale)
-        )
-        
-        # if save_step > 0 and save_flag:
-        #     print(dbuckets, bucket_thrd)
-        
-        dbuckets[dbuckets < bucket_thrd] = 0
+            dbuckets[dbuckets < bucket_thrd] = 0
+            hierarchical_dbuckets.append(dbuckets)
         
         # ==== Publish vector field ====
-        vector_field[:] = dbuckets[:]
+        vector_field[:] = np.concatenate(hierarchical_dbuckets)[:]
         
         # ==== End control ====    
         if(control_finish[0] > 0.):
@@ -351,13 +412,11 @@ parser.add_argument('--debug', action='store_true')
 parser.add_argument('--no-action', action='store_true')
 parser.add_argument('--save-step',type=float,default=-1)
 
-parser.add_argument('--deadend-dist',type=float, default=0.8)
-parser.add_argument('--collision-dist',type=float, default=0.3)
-
 parser.add_argument('--detour-thrd',type=float, default=0.3)
-parser.add_argument('--deadend-thrd',type=float, default=0.6)
-parser.add_argument('--collision-thrd',type=float, default=0.3)
+parser.add_argument('--deadend-thrd',type=float, default=0.1)
+parser.add_argument('--collision-thrd',type=float, default=0.25)
 
+parser.add_argument('--smooth', action='store_true')
 parser.add_argument('--occupied-thrd',type=float, default=0.5)
 
 parser.add_argument('-pad',type=list,nargs=4,default=[10,10,10,18])
@@ -375,30 +434,33 @@ parser.add_argument('-ws',type=float,default=0.40)
 parser.add_argument('-tf',type=float,default=0.5)
 parser.add_argument('-tn',type=float,default=1)
 
+parser.add_argument('-head',type=float,default=0.20)
 parser.add_argument('-xscale',type=float,default=0.05)
 parser.add_argument('-ymin',type=float,default=-0.3)
 parser.add_argument('-ymax',type=float,default=0.45)
-parser.add_argument('-zmin',type=float,default=0)
-parser.add_argument('-zmax',type=float,default=1.5)
+parser.add_argument('-z1',type=float,default=0.3)
+parser.add_argument('-z2',type=float,default=0.6)
+parser.add_argument('-z3',type=float,default=1.2)
 
 parser.add_argument('-tmax',type=float,default=20)
 
 args = parser.parse_args()
 intr = fake_intrinsics(edition='a1')
 num_buckets, bucket_start, bucket_left_hand = MY_DIP.calculate_bucket_from_args(intr,args)
+head_left_idx = int(np.floor(-args.head / args.xscale) - bucket_left_hand)
+head_right_idx = int(np.floor(args.head / args.xscale) - bucket_left_hand)
+num_head_buckets = head_right_idx - head_left_idx
 
 # ==== Parse Global Variables ====
 debug = args.debug
 no_action = args.no_action
 save_step = args.save_step
 
-deadend_dist = args.deadend_dist
-collision_dist = args.collision_dist
-
 detour_thrd = args.detour_thrd
 deadend_thrd = args.deadend_thrd
 collision_thrd = args.collision_thrd
 
+smooth = args.smooth
 occupied_thrd = args.occupied_thrd
 
 pad_u,pad_d,pad_l,pad_r = args.pad
@@ -425,7 +487,7 @@ if __name__ == "__main__":
     shared_depth_image_base = multiprocessing.Array(
         ctypes.c_double, 40 * 80, lock=False)
     shared_vector_field_base = multiprocessing.Array(
-        ctypes.c_double, num_buckets, lock=False)
+        ctypes.c_double, 3 * num_buckets, lock=False)
     control_finish_base = multiprocessing.Array(
         ctypes.c_double, 1, lock=False)
     reset_finish_base = multiprocessing.Array(

@@ -19,7 +19,7 @@ def fake_intrinsics(edition='default'):
     print(intrinsics)
     return intrinsics
 
-def calculate_from_d(d,v,w):
+def calculate_from_d_smooth(d,v,w):
     '''
     :param d: float or array, distance from the center of the robot to the target
     :param v: float, linear velocity
@@ -33,8 +33,23 @@ def calculate_from_d(d,v,w):
     sine = np.sin(theta)
     l = 2 * radius * sine
     t = theta / w
-    return l,t
+    return t, l
 
+def calculate_from_d(d,v,w,z):
+    '''
+    :param d: float or array, distance from the center of the robot to the target
+    :param v: float, linear velocity
+    :param w: float, angular velocity
+    :param z: fl
+    :return ts: float or array, the time cost of spinning move
+    :return tm, float or array, the time cost of marching move
+    '''
+    tangent = np.abs(d) / z
+    theta = np.arctan(tangent)
+    ts = theta / w
+    tm = np.sqrt(d**2 + z**2) / v
+    return ts,tm
+        
 def longest_zero_sequence(arr):
     '''
     Output the index (start,end) of the longest zero subsequence

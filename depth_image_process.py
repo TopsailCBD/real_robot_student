@@ -68,7 +68,7 @@ def calculate_bucket_from_args(intr,args=None):
     '''
     assert args is not None
     pad_u,pad_d,pad_l,pad_r = args.pad
-    dmin,dmax = calculate_d_range(intr,pad=((pad_u,pad_d),(pad_l,pad_r)),depth_thrd=args.zmax)
+    dmin,dmax = calculate_d_range(intr,pad=((pad_u,pad_d),(pad_l,pad_r)),depth_thrd=args.z3)
     
     dmin_idx = np.ceil(dmin/args.xscale) # The 0th bucket
     dmax_idx = np.floor(dmax/args.xscale) # The highest bucket
@@ -138,6 +138,7 @@ def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, 
 
     :param depth_image: array (H,W), depth image, scale:mm.
     :param camera_intrinsics: rs.pyrealsense2.intrinsics, The intrinsic values of the imager in whose coordinate system the depth_frame is computed.
+    :param usez: str, which in z1,z2,z3 to use as threshold
     :param scale: str, scale of depth image, 'mm' or 'm'.
     :param args: dict, argparse in the main file.
 
@@ -153,16 +154,19 @@ def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, 
     ny = np.linspace(0, height-1, height)
     
     u, v = np.meshgrid(nx, ny)
+    u = u.flatten()
+    v = v.flatten()
     
     if scale == 'mm':
         z = depth_image.flatten() / 1000
     else:
         z = depth_image.flatten()
     
-    z_idx = np.where((args.zmin < z) & (z <= args.zmax))
+    z_max = args.z3
+    z_idx = np.where((0 < z) & (z <= z_max))
     
-    u = u.flatten()[z_idx]
-    v = v.flatten()[z_idx]
+    u = u[z_idx]
+    v = v[z_idx]
     z = z[z_idx]
     
     x = (u - camera_intrinsics.ppx)/camera_intrinsics.fx
