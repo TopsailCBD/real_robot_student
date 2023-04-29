@@ -130,7 +130,7 @@ def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, 
     u, v = np.meshgrid(nx, ny)
     z = depth_image.flatten() / 1000;
     
-    z_idx = np.where(args.z_min < z <= args.z_max)
+    z_idx = np.where((args.zmin < z) & (z <= args.zmax))
     
     u = u.flatten()[z_idx]
     v = v.flatten()[z_idx]
@@ -139,7 +139,7 @@ def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, 
     x = (u - camera_intrinsics.ppx)/camera_intrinsics.fx
     y = (v - camera_intrinsics.ppy)/camera_intrinsics.fy
 
-    y_idx = np.where(args.y_min < y <= args.y_max)
+    y_idx = np.where((args.ymin < y) & (y <= args.ymax))
     
     x = x[y_idx]
     y = y[y_idx]

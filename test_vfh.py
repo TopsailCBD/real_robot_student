@@ -137,7 +137,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             
         else:
             # ==== Calculate shift length on horizontal direction ====
-            available_vector_field = vector_field[:vector_field[-1]]
+            available_vector_field = vector_field[:int(vector_field[-1])]
             zero_start,zero_end = longest_zero_sequence(available_vector_field)
             zero_middle = (zero_start + zero_end) / 2
             d = bucket_start + zero_middle * xscale
@@ -179,10 +179,10 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
     # Start streaming
     cfg = pipeline.start(config)
     
-    time.sleep(1)
-    profile = cfg.get_stream(rs.stream.depth)
-    intr = profile.as_video_stream_profile().get_intrinsics()
-    print('[GetDepthImage] Read intrinsics:',intr)
+    # time.sleep(1)
+    # profile = cfg.get_stream(rs.stream.depth)
+    # intr = profile.as_video_stream_profile().get_intrinsics()
+    # print('[GetDepthImage] Read intrinsics:',intr)
 
     depth_image = np.frombuffer(shared_depth_image_base, dtype=ctypes.c_double)    
     depth_image = np.reshape(depth_image, (40, 80))
@@ -268,15 +268,9 @@ def GetDepthImage(shared_depth_image_base, control_finish_base):
             break
         
 def GetVFH(shared_depth_image_base, shared_vector_field_base, control_finish_base):
+    while intr is None:
+        time.sleep(0.001)  
     print('[GetVFH] Get global intrinsics:',intr)
-    
-    # ==== Calculate range in horizontal direction ====
-    dmin,dmax = MY_DIP.calculate_d_range(intr,pad=((pad_u,pad_d),(pad_l,pad_r)),depth_thrd=args.ymax)
-    
-    dmin_idx = np.floor(dmin/xscale) # The 0th bucket
-    dmax_idx = np.floor(dmax/xscale) # The highest bucket
-    num_buckets = int(dmax_idx - dmin_idx + 1)
-    bucket_start = dmin_idx * xscale
     
     # ==== Get depth image ====
     depth_image = np.frombuffer(shared_depth_image_base, dtype=ctypes.c_double)    
@@ -319,18 +313,47 @@ def GetVFH(shared_depth_image_base, shared_vector_field_base, control_finish_bas
         
         dbuckets = np.zeros((num_buckets))
         for coordinate in coordinate_list:
-            bucket_idx = np.floor(coordinate[0]/xscale) - dmin_idx
+            bucket_idx = np.floor(coordinate[0]/xscale) - bucket_left_hand
             dbuckets[bucket_idx] += 1
         dbuckets[dbuckets < bucket_thrd] = 0
         
         # ==== Publish vector field ====
         vector_field[:num_buckets] = dbuckets[:]
         vector_field[-1] = num_buckets
-            
+        
         # ==== End control ====    
         if(control_finish[0] > 0.):
             break
+        
+def Preprocess():
+    global intr,num_buckets,bucket_start,bucket_left_hand
+    
+    # ==== Configure depth and color streams ====
+    pipeline = rs.pipeline()
+    config = rs.config()
+    config.enable_stream(rs.stream.depth, rs.format.z16, 30)
+    config.enable_stream(rs.stream.color, rs.format.bgr8, 30)
+    
+    # ==== Get camera intrinsics ====
+    cfg = pipeline.start(config)
+    
+    time.sleep(1)
+    profile = cfg.get_stream(rs.stream.depth)
+    intr = profile.as_video_stream_profile().get_intrinsics()
+    print('[Preprocess] Read intrinsics:',intr)
 
+    # ==== Calculate range in horizontal direction ====
+    dmin,dmax = MY_DIP.calculate_d_range(intr,pad=((pad_u,pad_d),(pad_l,pad_r)),depth_thrd=args.zmax)
+    
+    dmin_idx = np.floor(dmin/xscale) # The 0th bucket
+    dmax_idx = np.floor(dmax/xscale) # The highest bucket
+    
+    num_buckets = int(dmax_idx - dmin_idx + 1) # Number of buckets, length of vector field
+    bucket_start = dmin_idx * xscale # d at the 0th bucket
+    bucket_left_hand = dmin_idx # Shift of index from 0th bucket to d=0
+    
+    print('[Preprocess] Calculate bucket list: num_buckets =',num_buckets,'bucket_start =',bucket_start,'bucket_left_hand =',bucket_left_hand)
+    
 # ==== Parser Definition ====
 parser = argparse.ArgumentParser()
 
@@ -354,7 +377,7 @@ parser.add_argument('-vb',type=float,default=0.15)
 parser.add_argument('-w',type=float,default=0.4)
 # parser.add_argument('-w1',type=float,default=0.24)
 # parser.add_argument('-w2',type=float,default=0.16)
-# parser.add_argument('-ws',type=float,default=0.40)
+parser.add_argument('-ws',type=float,default=0.40)
 # parser.add_argument('-w3',type=float,default=0.21)
 
 # parser.add_argument('-t1',type=float,default=2)
@@ -374,13 +397,13 @@ args = parser.parse_args()
 intr = None
 num_buckets = -1
 bucket_start = 0
+bucket_left_hand = -1
 
 # ==== Parse Global Variables ====
 debug = args.debug
 no_action = args.no_action
 save_step = args.save_step
 
-detour_dist = args.detour_dist
 deadend_dist = args.deadend_dist
 collision_dist = args.collision_dist
 
@@ -426,6 +449,8 @@ if __name__ == "__main__":
     act[:] = np.zeros(12)
     obs[:] = np.zeros(48)
 
+    Preprocess()
+    
     # Add shared depth image to RobotControl
     p1 = Process(target=RobotControl, args=(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, shared_vector_field_base, tmax,))
     p2 = Process(target=GetAction, args=(shared_obs_base, shared_act_base, control_finish_base,reset_finish_base, ))

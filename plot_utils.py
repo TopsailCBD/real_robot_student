@@ -29,16 +29,20 @@ def calculate_from_d(d,v,w):
     theta = np.arccos(cosine)
     sine = np.sin(theta)
     l = 2 * radius * sine
-    t = w / theta
+    t = theta / w
     return l,t
 
 def longest_zero_sequence(arr):
     '''
     Output the index (start,end) of the longest zero subsequence
     for u,v in zero sequence: satisfies arr[u:v] == np.zeros(v-u)
+    :param arr: list or np.ndarray
     '''
     zero_range = (0,0)
-    arr.append(1)
+    if type(arr) is list:
+        arr.append(1)
+    elif type(arr) is np.ndarray:
+        arr = np.append(arr,1)
     
     start = -1
     for idx, x in enumerate(arr):
