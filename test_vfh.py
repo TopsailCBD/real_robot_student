@@ -126,7 +126,17 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             # robot.command = command_spin
             # print('Command:',robot.command)
             robot.state = 'FROZEN'
-        
+            
+        elif robot.state == 'VFH_S':
+            if smooth:
+                raise NotImplementedError
+            else:
+                if robot.detour_mode != 0 and not need_spin_flag:
+                    robot.state = 'VFH_2'
+                    robot.command = command_march
+                    robot.detour_clock = time.time()
+                    print('Less collision risk, back to VFH detour.')
+                    
         elif robot.state == 'VFH_1':
             if smooth:           
                 if robot.detour_mode != 0 and time.time() - robot.detour_clock > td:
@@ -138,9 +148,15 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     print('Change command to',robot.command)
             else:
                 if robot.detour_mode != 0 and time.time() - robot.detour_clock > ts and should_march_flag:
-                    ts = time.time()
-                    robot.state = 'VFH_2'
-                    print('Part I of harsh VFH ends.')
+                    ts = time.time() - robot.detour_clock
+                    
+                    if ts > tf:
+                        robot.state = 'MARCHING'
+                        robot.detour_mode = 0
+                        print('Harsh VFH got interrupted.')
+                    else:
+                        robot.state = 'VFH_2'
+                        print('Part I of harsh VFH ends.')
                     
                     robot.detour_clock = time.time()
                     robot.command = command_march
@@ -150,7 +166,21 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             if smooth:
                 raise NotImplementedError
             else:
-                 if robot.detour_mode != 0 and time.time() - robot.detour_clock > tm:
+                if need_spin_flag:
+                    robot.detour_clock = time.time()
+                    tm = tm - (time.time() - robot.detour_clock)
+                    
+                    robot.state = 'VFH_S'
+                    head_left_occupied = np.count_nonzero(vector_collision[head_left_idx:head_center_idx])
+                    head_right_occupied = np.count_nonzero(vector_collision[head_center_idx:head_right_idx])
+                    
+                    spinning_direction = 1 if head_left_occupied < head_right_occupied else -1
+                    robot.command = command_spin * np.array([1,0,spinning_direction])
+                    
+                    print('Part II of harsh VFH pauses to avoid collision')
+                    print('Change command to',robot.command)
+                    
+                elif robot.detour_mode != 0 and time.time() - robot.detour_clock > tm:
                     robot.state = 'VFH_3'
                     print('Part II of harsh VFH ends.')
                     
@@ -165,6 +195,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     # robot.state = 'FROZEN'
                     print('Part II of smooth VFH ends.')
                     
+                    robot.detour_mode = 0
                     robot.detour_clock = time.time()
                     robot.command = command_march
                     print('Change command to',robot.command)  
@@ -173,6 +204,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     robot.state = 'MARCHING'
                     print('Part III of harsh VFH ends.')
                     
+                    robot.detour_mode = 0
                     robot.detour_clock = time.time()
                     robot.command = command_march
                     print('Change command to',robot.command)                     
@@ -431,7 +463,7 @@ parser.add_argument('-ws',type=float,default=0.40)
 
 # parser.add_argument('-t1',type=float,default=2)
 # parser.add_argument('-t2',type=float,default=4)
-parser.add_argument('-tf',type=float,default=0.5)
+parser.add_argument('-tf',type=float,default=5)
 parser.add_argument('-tn',type=float,default=1)
 
 parser.add_argument('-head',type=float,default=0.20)
@@ -449,6 +481,7 @@ intr = fake_intrinsics(edition='a1')
 num_buckets, bucket_start, bucket_left_hand = MY_DIP.calculate_bucket_from_args(intr,args)
 head_left_idx = int(np.floor(-args.head / args.xscale) - bucket_left_hand)
 head_right_idx = int(np.floor(args.head / args.xscale) - bucket_left_hand)
+head_center_idx = int(np.floor(0 / args.xscale) - bucket_left_hand)
 num_head_buckets = head_right_idx - head_left_idx
 
 # ==== Parse Global Variables ====
