@@ -118,6 +118,24 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             # robot.command = command_spin
             # print('Command:',robot.command)
             robot.state = 'FROZEN'
+        elif robot.state == 'VFH_1':
+            if robot.detour_mode != 0 and time.time() - robot.detour_clock > ts:
+                robot.state = 'VFH_2'
+                print('First step of VFH ends.')
+                
+                robot.detour_clock = time.time()
+                robot.command = command_detour * np.array([1,0,-robot.detour_mode])
+                print('Change command to',robot.command)
+                
+        elif robot.state == 'VFH_2':
+            if robot.detour_mode != 0 and time.time() - robot.detour_clock > ts:
+                robot.state = 'MARCHING'
+                print('Second step of VFH ends.')
+                
+                robot.detour_clock = time.time()
+                robot.command = old_command
+                print('Change command to',robot.command)  
+            
         else:
             # ==== Calculate shift length on horizontal direction ====
             available_vector_field = vector_field[:vector_field[-1]]
@@ -126,7 +144,21 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
             d = bucket_start + zero_middle * xscale
             l,ts = calculate_from_d(d,args.v,args.w)
             
+            robot.state = 'VFH_1'
+            robot.detour_clock = time.time()
             
+            if d > 0:
+                robot.detour_mode = -1 # Turn right first
+                detour_direction = 'right'
+            else:
+                robot.detour_mode = 1 # Turn left first
+                detour_direction = 'left'
+                
+            print('VFH calculated, start detour, direction:',detour_direction)
+            
+            old_command = robot.command
+            robot.command = command_detour * np.array([1,0,robot.detour_mode])
+            print('Change command to',robot.command)
         
         obs[:] = robot.ConstructObservation()
 
@@ -319,13 +351,13 @@ parser.add_argument('-pad',type=list,nargs=4,type=int,default=[10,10,10,18])
 
 parser.add_argument('-v',type=float,default=0.35)
 parser.add_argument('-vb',type=float,default=0.15)
-
-parser.add_argument('-w1',type=float,default=0.24)
-parser.add_argument('-w2',type=float,default=0.16)
-parser.add_argument('-ws',type=float,default=0.40)
+parser.add_argument('-w',type=float,default=0.4)
+# parser.add_argument('-w1',type=float,default=0.24)
+# parser.add_argument('-w2',type=float,default=0.16)
+# parser.add_argument('-ws',type=float,default=0.40)
 # parser.add_argument('-w3',type=float,default=0.21)
 
-parser.add_argument('-t1',type=float,default=2)
+# parser.add_argument('-t1',type=float,default=2)
 # parser.add_argument('-t2',type=float,default=4)
 parser.add_argument('-tf',type=float,default=0.5)
 parser.add_argument('-tn',type=float,default=1)
@@ -361,16 +393,12 @@ occupied_thrd = args.occupied_thrd
 pad_u,pad_d,pad_l,pad_r = args.pad
 
 command_march = np.array([args.v, 0, 0.01])
-command_deflection = np.array([args.v, 0, args.w1])
-command_detour = np.array([args.v, 0, -args.w2])
+command_detour = np.array([args.v, 0, args.w])
 command_spin = np.array([0,0,args.ws])
 command_back = np.array([-args.vb,0,0])
 
 xscale = args.xscale
 
-t1 = args.t1
-t2 = 2 * args.w1 * args.t1 / args.w2
-t3 = args.t1
 tn = args.tn
 tf = args.tf
 tmax = args.tmax
