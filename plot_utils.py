@@ -19,7 +19,7 @@ def fake_intrinsics(edition='default'):
     print(intrinsics)
     return intrinsics
 
-def calculate_from_d_smooth(d,v,w):
+def calculate_from_d_smooth(d,v,w,z=None,polar=False):
     '''
     :param d: float or array, distance from the center of the robot to the target
     :param v: float, linear velocity
@@ -27,15 +27,18 @@ def calculate_from_d_smooth(d,v,w):
     :return l: float or array, the length the robot would move front on z-axis
     :return t: float or array, the time cost of this move
     '''
+    if polar:
+        d = z * np.sin(d) # d is theta
+    
     radius = v / w
     cosine = 1 - np.abs(d)/2*radius
-    theta = np.arccos(cosine)
-    sine = np.sin(theta)
+    phi = np.arccos(cosine)
+    sine = np.sin(phi)
     l = 2 * radius * sine
-    t = theta / w
+    t = phi / w
     return t, l
 
-def calculate_from_d(d,v,w,z):
+def calculate_from_d(d,v,w,z,polar=None):
     '''
     :param d: float or array, distance from the center of the robot to the target
     :param v: float, linear velocity
@@ -44,8 +47,11 @@ def calculate_from_d(d,v,w,z):
     :return ts: float or array, the time cost of spinning move
     :return tm, float or array, the time cost of marching move
     '''
-    tangent = np.abs(d) / z
-    theta = np.arctan(tangent)
+    if polar:
+        theta = np.abs(d)
+    else:
+        tangent = np.abs(d) / z
+        theta = np.arctan(tangent)
     ts = theta / w
     tm = np.sqrt(d**2 + z**2) / v
     return ts,tm

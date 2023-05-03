@@ -45,7 +45,7 @@ def ratios_of_three_parts(three_img,three_thrd):
     return [ratio_of_obstacle(img,thrd) for img,thrd in zip(three_img,three_thrd)]
 
 
-def calculate_d_range(intr,shape=(60,108),origin_cv_shape = (848,480), pad=((10,10),(10,18)), depth_thrd=1.5):
+def calculate_d_range(intr,shape=(60,108),origin_cv_shape = (848,480), pad=((10,10),(10,18)), depth_thrd=1.5,polar=False):
     (pad_u, pad_d),(pad_l,pad_r) = pad
     fake_depth = np.zeros(shape)
     fake_depth[pad_u+1:-pad_d,pad_l+1] = depth_thrd * 1000
@@ -54,8 +54,14 @@ def calculate_d_range(intr,shape=(60,108),origin_cv_shape = (848,480), pad=((10,
     resized_fake_depth = cv2.resize(fake_depth, origin_cv_shape, interpolation=cv2.INTER_NEAREST)
     x_range_coordinate = convert_depth_frame_to_pointcloud(resized_fake_depth,intr)
     
-    x = x_range_coordinate[:,0]
-    return min(x),max(x)
+    if polar:
+        x = x_range_coordinate[:,0]
+        z = x_range_coordinate[:,2]
+        theta = np.arctan(x/z) # (-pi/2,pi/2)
+        return min(theta), max(theta)
+    else:
+        x = x_range_coordinate[:,0]
+        return min(x), max(x)
 
 def calculate_bucket_from_args(intr,args=None):
     '''
@@ -68,7 +74,7 @@ def calculate_bucket_from_args(intr,args=None):
     '''
     assert args is not None
     pad_u,pad_d,pad_l,pad_r = args.pad
-    dmin,dmax = calculate_d_range(intr,pad=((pad_u,pad_d),(pad_l,pad_r)),depth_thrd=args.z3)
+    dmin,dmax = calculate_d_range(intr,pad=((pad_u,pad_d),(pad_l,pad_r)),depth_thrd=args.z3,polar=args.polar)
     
     dmin_idx = np.ceil(dmin/args.xscale) # The 0th bucket
     dmax_idx = np.floor(dmax/args.xscale) # The highest bucket
@@ -162,23 +168,50 @@ def convert_depth_frame_to_pointcloud_with_args(depth_image, camera_intrinsics, 
     else:
         z = depth_image.flatten()
     
-    z_max = args.z3
-    z_idx = np.where((0 < z) & (z <= z_max))
+    # 直角坐标系下以z为限制
+    if not args.polar: 
+        z_max = args.z3
+        z_idx = np.where((0 < z) & (z <= z_max))
+        
+        u = u[z_idx]
+        v = v[z_idx]
+        z = z[z_idx]
     
-    u = u[z_idx]
-    v = v[z_idx]
-    z = z[z_idx]
-    
-    x = (u - camera_intrinsics.ppx)/camera_intrinsics.fx
-    y = (v - camera_intrinsics.ppy)/camera_intrinsics.fy
+        x = (u - camera_intrinsics.ppx)/camera_intrinsics.fx
+        y = (v - camera_intrinsics.ppy)/camera_intrinsics.fy
 
-    y_idx = np.where((args.ymin < y) & (y <= args.ymax))
-    
-    x = x[y_idx]
-    y = y[y_idx]
-    z = z[y_idx]
+        y_idx = np.where((args.ymin < y) & (y <= args.ymax))
+        
+        x = x[y_idx]
+        y = y[y_idx]
+        z = z[y_idx]
 
-    x = np.multiply(x,z)
-    y = np.multiply(y,z)
+        x = np.multiply(x,z)
+        y = np.multiply(y,z)
 
-    return np.stack([x, y, z]).transpose()
+        return np.stack([x, y, z]).transpose()
+    # 极坐标系下以r为限制
+    else:
+        x = (u - camera_intrinsics.ppx)/camera_intrinsics.fx
+        y = (v - camera_intrinsics.ppy)/camera_intrinsics.fy
+
+        y_idx = np.where((args.ymin < y) & (y <= args.ymax))
+        
+        x = x[y_idx]
+        y = y[y_idx]
+        z = z[y_idx]
+
+        x = np.multiply(x,z)
+        y = np.multiply(y,z)
+        
+        r_max = args.z3
+        r = np.sqrt(x**2+z**2)
+        r_idx = np.where((0 < r) & (r <= r_max))
+        
+        x = x[r_idx]
+        y = y[r_idx]
+        z = z[r_idx]
+        r = r[r_idx]
+        theta  = np.arctan(x/z)
+        
+        return np.stack([x,y,z,r,theta]).transpose()

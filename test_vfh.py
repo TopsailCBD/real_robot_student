@@ -221,7 +221,7 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                 
                 else:
                     zero_middle = (zero_start + zero_end) / 2 
-                    d = bucket_start + zero_middle * xscale
+                    d = bucket_start + zero_middle * xscale # x when rectangle | theta when polar
                     
                     if d > 0:
                         robot.detour_mode = -1 # Turn right first
@@ -233,15 +233,16 @@ def RobotControl(shared_obs_base, shared_act_base, control_finish_base,reset_fin
                     robot.state = 'VFH_1'
                     robot.detour_clock = time.time()
                     
+                    print(vector_detour)
                     if smooth:
-                        td, l = calculate_from_d_smooth(d,args.v,args.w)
+                        td, l = calculate_from_d_smooth(d,args.v,args.w,args.z2,args.polar)
                             
                         print('VFH calculated, start detour, direction:',detour_direction)
                         print('no-obstacle:',(zero_start,zero_end),'d =',d,'l =',l,'td =',td)
 
                         robot.command = command_detour * np.array([1,0,robot.detour_mode])
                     else:
-                        ts, tm = calculate_from_d(d,args.v,args.w,args.z2)
+                        ts, tm = calculate_from_d(d,args.v,args.w,args.z2,args.polar)
                         print('VFH calculated, start detour, direction:',detour_direction)
                         print('no-obstacle:',(zero_start,zero_end),'d =',d,'ts =',ts,'tm =',tm)
 
@@ -414,18 +415,28 @@ def GetVFH(shared_depth_image_base, shared_vector_field_base, control_finish_bas
         #     dbuckets[bucket_idx] += 1
         
         coordinate_z3 = coordinate_list
-        coordinate_z2 = coordinate_z3[coordinate_z3[:,2] < args.z2]
-        coordinate_z1 = coordinate_z2[coordinate_z2[:,2] < args.z1]
-        # coordinate_z2 = filter(lambda x: x[2] < args.z2, coordinate_z3)
-        # coordinate_z1 = filter(lambda x: x[2] < args.z1, coordinate_z2)
+        if polar: # [x,y,z,r,theta]
+            coordinate_z2 = coordinate_z3[coordinate_z3[:,3] < args.z2]
+            coordinate_z1 = coordinate_z2[coordinate_z2[:,3] < args.z1]
+        else: # [x,y,z]
+            coordinate_z2 = coordinate_z3[coordinate_z3[:,2] < args.z2]
+            coordinate_z1 = coordinate_z2[coordinate_z2[:,2] < args.z1]
+
         
         hierarchical_dbuckets = []
         for coordinates in (coordinate_z1,coordinate_z2,coordinate_z3):
-            dbuckets, bin_edges = np.histogram(
-                coordinates[:,0],
-                bins=num_buckets,
-                range=(bucket_left_hand * xscale, (bucket_left_hand + num_buckets) * xscale)
-            )
+            if polar: # [x,y,z,r,theta]
+                dbuckets, bin_edges = np.histogram(
+                    coordinates[:,4],
+                    bins=num_buckets,
+                    range=(bucket_left_hand * xscale, (bucket_left_hand + num_buckets) * xscale)
+                )
+            else: # [x,y,z]
+                dbuckets, bin_edges = np.histogram(
+                    coordinates[:,0],
+                    bins=num_buckets,
+                    range=(bucket_left_hand * xscale, (bucket_left_hand + num_buckets) * xscale)
+                )               
             
             dbuckets[dbuckets < bucket_thrd] = 0
             hierarchical_dbuckets.append(dbuckets)
@@ -449,6 +460,7 @@ parser.add_argument('--deadend-thrd',type=float, default=0.1)
 parser.add_argument('--collision-thrd',type=float, default=0.25)
 
 parser.add_argument('--smooth', action='store_true')
+parser.add_argument('--polar', action='store_true')
 parser.add_argument('--occupied-thrd',type=float, default=0.5)
 
 parser.add_argument('-pad',type=list,nargs=4,default=[10,10,10,18])
@@ -470,7 +482,7 @@ parser.add_argument('-head',type=float,default=0.20)
 parser.add_argument('-xscale',type=float,default=0.05)
 parser.add_argument('-ymin',type=float,default=-0.3)
 parser.add_argument('-ymax',type=float,default=0.45)
-parser.add_argument('-z1',type=float,default=0.3)
+parser.add_argument('-z1',type=float,default=0.4)
 parser.add_argument('-z2',type=float,default=0.6)
 parser.add_argument('-z3',type=float,default=1.2)
 
@@ -494,6 +506,7 @@ deadend_thrd = args.deadend_thrd
 collision_thrd = args.collision_thrd
 
 smooth = args.smooth
+polar = args.polar
 occupied_thrd = args.occupied_thrd
 
 pad_u,pad_d,pad_l,pad_r = args.pad
