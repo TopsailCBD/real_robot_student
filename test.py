@@ -375,7 +375,7 @@ parser.add_argument('--save-step',type=float,default=-1)
 parser.add_argument('--ctr-dist', type=float, default=1)
 parser.add_argument('--side-dist',type=float, default=1.5)
 parser.add_argument('--deadend-dist',type=float, default=0.8)
-parser.add_argument('--collision-dist',type=float, default=0.3)
+parser.add_argument('--collision-dist',type=float, default=0.4)
 
 parser.add_argument('--detour-thrd',type=float, default=0.3)
 parser.add_argument('--deadend-thrd',type=float, default=0.6)
